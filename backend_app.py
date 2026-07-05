@@ -13,8 +13,7 @@ from fact_checker_by_url import check_url_validity, get_trained_nll_model
 from naver_news_api import SUPABASE_URL, SUPABASE_KEY
 
 if not SUPABASE_URL or not SUPABASE_KEY or SUPABASE_URL == "여기에_프로젝트_URL_입력":
-    print("[-] 에러: naver_news_api.py 파일에 Supabase URL 및 API Key를 올바르게 입력해 주세요.")
-    sys.exit(1)
+    print("[-] 경고: Supabase URL 또는 API Key가 설정되지 않았습니다. 환경 변수를 확인해 주세요.")
 
 # Warm up NLL model
 nll_model, nll_threshold = get_trained_nll_model()
