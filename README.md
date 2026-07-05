@@ -130,6 +130,20 @@ npm run dev
 ```
 웹 브라우저를 열고 `http://localhost:5173`으로 접속하면 미려한 실시간 팩트체킹 대시보드를 사용할 수 있습니다.
 
+### 6. Vercel 클라우드 배포 방법
+본 프로젝트는 **Vercel Serverless Functions(Python)**와 **Vite React** 정적 파일 호스팅을 하나의 레포지토리에서 통합 서빙할 수 있도록 설계되었습니다.
+
+1. **Vercel 대시보드**에서 GitHub 저장소를 가져오기(Import)합니다.
+2. **Build & Output Settings** 항목을 다음과 같이 설정합니다:
+   * **Framework Preset**: `Vite` 또는 `Other`
+   * **Build Command**: `npm run build` (루트 `package.json`이 frontend 빌드를 위임)
+   * **Output Directory**: `frontend/dist`
+3. **Environment Variables** 메뉴에서 다음 5가지 환경변수를 등록합니다:
+   * `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`
+   * `GEMINI_API_KEY`
+   * `SUPABASE_URL`, `SUPABASE_KEY`
+4. **Deploy** 버튼을 누르면 서버리스 백엔드 API와 프론트엔드가 단일 도메인으로 통합 배포됩니다.
+
 ---
 
 ## 📈 테스트 및 성능 검증 (Load Test Results)
