@@ -1,0 +1,25 @@
+# Environment variables (Sensitive credentials)
+.env
+
+# Python Virtual Environment
+.venv/
+venv/
+ENV/
+
+# Python Cache & temporary files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Node modules & frontend builds
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Editor configuration files
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
