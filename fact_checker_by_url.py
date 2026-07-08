@@ -163,6 +163,81 @@ def scrape_url_content(url):
         print(f"[-] 웹 크롤링 중 에러 발생: {e}")
         return None
 
+# 인스타그램 게시물/릴스 URL 패턴
+INSTAGRAM_URL_RE = re.compile(r'instagram\.com/(?:[A-Za-z0-9_.]+/)?(?:p|reel|reels|tv)/([A-Za-z0-9_-]+)')
+
+def is_instagram_url(url):
+    return bool(INSTAGRAM_URL_RE.search(url))
+
+def scrape_instagram_post(url):
+    """
+    인스타그램 공개 게시물의 캡션을 추출합니다.
+    일반 브라우저 UA로는 로그인 벽에 막히지만, 링크 미리보기용 크롤러 UA(facebookexternalhit)로
+    요청하면 공개 게시물의 og:title / og:description 메타 태그에 캡션 전문이 담겨 옵니다.
+    """
+    m = INSTAGRAM_URL_RE.search(url)
+    if not m:
+        return None
+    shortcode = m.group(1)
+    canonical_url = f"https://www.instagram.com/p/{shortcode}/"
+
+    headers = {
+        "User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"
+    }
+    try:
+        resp = requests.get(canonical_url, headers=headers, timeout=15)
+        if resp.status_code != 200:
+            print(f"[-] 인스타그램 게시물 접근 실패 (HTTP {resp.status_code}): {canonical_url}")
+            return None
+
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        og_title = soup.find('meta', property='og:title')
+        og_desc = soup.find('meta', property='og:description') or soup.find('meta', attrs={'name': 'description'})
+
+        og_title_text = og_title['content'].strip() if og_title and og_title.get('content') else ""
+        og_desc_text = og_desc['content'].strip() if og_desc and og_desc.get('content') else ""
+
+        # og:title 형식: '{표시 이름} on Instagram: "{캡션 전문}"'
+        caption = ""
+        author = ""
+        title_match = re.match(r'^(.*?) on Instagram:\s*[\"“](.*)[\"”]\s*$', og_title_text, re.DOTALL)
+        if title_match:
+            author = title_match.group(1).strip()
+            caption = title_match.group(2).strip()
+
+        # og:description 형식: '{좋아요}, {댓글} - {유저명} on {날짜}: "{캡션}"'
+        desc_match = re.match(r'^.*? - ([A-Za-z0-9_.]+) on ([^:]+):\s*[\"“](.*)[\"”]\s*$', og_desc_text, re.DOTALL)
+        username = desc_match.group(1) if desc_match else ""
+        post_date = desc_match.group(2).strip() if desc_match else ""
+        if not caption and desc_match:
+            caption = desc_match.group(3).strip()
+
+        if not caption:
+            print("[-] 인스타그램 캡션을 추출하지 못했습니다. 비공개 계정이거나 캡션이 없는 게시물일 수 있습니다.")
+            return None
+
+        caption = re.sub(r'\s+', ' ', caption).strip()
+
+        # 검색 키워드 추출에 쓰일 제목: 캡션 첫 문장(최대 60자)
+        first_line = caption.split(". ")[0][:60].strip()
+        display_author = username or author
+        title = f"[인스타그램] {display_author}: {first_line}" if display_author else f"[인스타그램] {first_line}"
+
+        content = caption
+        if post_date:
+            content = f"(게시일: {post_date}) {content}"
+
+        print(f"    - 인스타그램 게시물 감지 (작성자: {display_author or '알 수 없음'})")
+        return {
+            'url': canonical_url,
+            'title': title,
+            'content': content,
+            'search_text': first_line  # 검색어 추출은 대괄호 접두어 없이 캡션만 사용
+        }
+    except Exception as e:
+        print(f"[-] 인스타그램 게시물 크롤링 중 에러 발생: {e}")
+        return None
+
 def strip_josa(word):
     """
     한글 단어 뒤에 붙는 대표적인 조사들을 지워 명사 원형만 남깁니다.
@@ -200,9 +275,9 @@ def extract_keywords_fast(title):
     # 핵심 명사 최대 10개 선택 (이벤트 핵심 액션 단어 유실 방지)
     return filtered[:10]
 
-def fact_check_article_with_sources(target_title, target_content, sources):
+def fact_check_article_with_sources(target_title, target_content, sources, content_label="기사"):
     """
-    검증 대상 기사와, 수집된 진짜 뉴스 참고 자료들을 상호 대조하여 가짜뉴스 판정 결과를 내립니다.
+    검증 대상 기사(또는 SNS 게시물)와, 수집된 진짜 뉴스 참고 자료들을 상호 대조하여 가짜뉴스 판정 결과를 내립니다.
     """
     if not sources:
         return {
@@ -210,21 +285,21 @@ def fact_check_article_with_sources(target_title, target_content, sources):
             "reason": "검색된 관련 신뢰 뉴스 기사가 전혀 없습니다. 신생 루머이거나 극히 폐쇄적인 커뮤니티성 허위 사실일 가능성이 높습니다.",
             "contradiction_score": 0.8
         }
-        
+
     sources_text = ""
     for i, s in enumerate(sources):
         sources_text += f"[참고 뉴스 {i+1}]\n제목: {s['title']}\n요약: {s['description']}\n출처 링크: {s['link']}\n\n"
-        
+
     prompt = (
         "당신은 가짜 뉴스와 조작된 허위 기사를 가려내는 전문 팩트체커 AI입니다.\n"
-        "아래 제공된 [검증 대상 기사]의 사실 관계와, 포털 뉴스 API를 통해 실시간 검색된 공식 [참고 뉴스 기사 목록]을 상호 비교하십시오.\n\n"
-        "[검증 대상 기사]\n"
+        f"아래 제공된 [검증 대상 {content_label}]의 사실 관계와, 포털 뉴스 API를 통해 실시간 검색된 공식 [참고 뉴스 기사 목록]을 상호 비교하십시오.\n\n"
+        f"[검증 대상 {content_label}]\n"
         f"제목: {target_title}\n"
         f"본문: {target_content[:500]}\n\n" # 속도 개선을 위해 1500자 -> 500자로 제한 (컨텍스트 로딩 시간 단축)
         "[참고 뉴스 기사 목록]\n"
         f"{sources_text}\n"
         "검증 지침:\n"
-        "1. 참고 뉴스 목록과 비교했을 때, 검증 대상 기사가 없는 사실을 창작했거나 모순되는 주장을 하는지 판단하세요.\n"
+        f"1. 참고 뉴스 목록과 비교했을 때, 검증 대상 {content_label}가 없는 사실을 창작했거나 모순되는 주장을 하는지 판단하세요.\n"
         "2. 인물의 발언, 사건 여부, 통계 수치 등이 다르게 보도되었는지 대조하세요.\n"
         "3. 판단 종류:\n"
         "   - REAL: 참고 뉴스들과 내용(사건, 수치, 발언)이 거의 일치하는 정상 보도 기사인 경우\n"
@@ -380,18 +455,22 @@ def check_url_validity(url, nll_model=None, nll_threshold=5.6):
     """
     print(f"\n[1] 입력받은 URL 크롤링 중...")
     print(f"    Target: {url}")
-    article = scrape_url_content(url)
-    
+    is_instagram = is_instagram_url(url)
+    article = scrape_instagram_post(url) if is_instagram else scrape_url_content(url)
+
     if not article or not article['content']:
         print("[-] 본문 텍스트를 추출할 수 없거나 웹페이지 접근에 실패했습니다.")
         return None
-        
+
     print(f"    - 기사 제목: {article['title']}")
     print(f"    - 본문 길이: {len(article['content'])} 자 추출 완료.")
-    
+
     # === 1단계: NLL 통계 필터 검사 ===
+    # 인스타그램 캡션은 뉴스 문체 코퍼스로 학습된 NLL 필터에 부적합하므로 건너뛰고 바로 2단계 검증
     nll_loss = None
-    if nll_model:
+    if is_instagram:
+        print("\n[1-5] SNS 게시물은 1단계 NLL 필터를 건너뛰고 2단계 정밀 팩트체크로 바로 진행합니다.")
+    elif nll_model:
         print("\n[1-5] 1단계 NLL 통계 필터 분석 중...")
         tokens = custom_tokenize(article['title'] + " " + article['content'])
         nll_loss, _ = nll_model.calculate_sentence_loss(tokens)
@@ -417,9 +496,11 @@ def check_url_validity(url, nll_model=None, nll_threshold=5.6):
         
     # === 2단계: RAG-LLM 팩트체크 ===
     print("\n[2] 로컬 텍스트 분석 기반 핵심 검색 키워드 추출 중...")
-    keywords = extract_keywords_fast(article['title'])
+    # 인스타그램은 '[인스타그램] 유저명:' 접두어를 제외한 캡션 본문에서 키워드 추출
+    search_base = article.get('search_text') or article['title']
+    keywords = extract_keywords_fast(search_base)
     if not keywords:
-        search_query = article['title'][:15]
+        search_query = search_base[:15]
     else:
         search_query = " ".join(keywords)
     print(f"    - 추출된 검색어: '{search_query}'")
@@ -432,7 +513,8 @@ def check_url_validity(url, nll_model=None, nll_threshold=5.6):
         print(f"      ({i+1}) {s['title']} | {s['pubDate']}")
         
     print("\n[4] RAG-LLM 기반 상호 팩트체크 대조 분석 중...")
-    result = fact_check_article_with_sources(article['title'], article['content'], sources)
+    content_label = "인스타그램 게시물" if is_instagram else "기사"
+    result = fact_check_article_with_sources(article['title'], article['content'], sources, content_label=content_label)
     
     # 입력 정보 병합
     result['target_title'] = article['title']
