@@ -16,6 +16,9 @@ from reconstruction_detector import TrigramLanguageModel, custom_tokenize
 OLLAMA_GENERATE_URL = "http://localhost:11434/api/generate"
 MODEL_NAME = "qwen3.5:latest"
 
+# Vercel 등 서버리스 환경에서는 localhost Ollama에 접근할 수 없으므로 폴백을 건너뜁니다.
+IS_SERVERLESS = bool(os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
+
 # Real credentials (loaded automatically from naver_news_api.py if set, or defined here)
 from naver_news_api import NAVER_CLIENT_ID, NAVER_CLIENT_SECRET, GEMINI_API_KEY
 
@@ -270,6 +273,18 @@ def fact_check_article_with_sources(target_title, target_content, sources):
             print(f"[-] Gemini API 통신 중 에러 발생: {e}")
             
         print("[-] Gemini API 연동 실패로 인해 로컬 Ollama 모델로 폴백(Fallback)합니다.")
+
+    # 서버리스 환경에서는 localhost Ollama가 존재하지 않으므로 즉시 판정을 유보합니다.
+    if IS_SERVERLESS:
+        if not (GEMINI_API_KEY and GEMINI_API_KEY.strip() and GEMINI_API_KEY.strip() != "YOUR_GEMINI_API_KEY"):
+            reason = "서버에 GEMINI_API_KEY 환경 변수가 설정되지 않아 2단계 LLM 정밀 분석을 수행할 수 없습니다. 배포 설정에서 환경 변수를 등록해 주세요."
+        else:
+            reason = "Gemini API 호출에 실패하여 최종 판정을 유보합니다. 잠시 후 다시 시도해 주세요."
+        return {
+            "verdict": "SUSPICIOUS",
+            "reason": reason,
+            "contradiction_score": 0.5
+        }
 
     # 로컬 Ollama 모델을 활용한 기존 폴백 로직
     payload = {

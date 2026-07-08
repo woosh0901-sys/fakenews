@@ -1,7 +1,6 @@
 import os
 import sys
 import requests
-import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -12,8 +11,9 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from fact_checker_by_url import check_url_validity, get_trained_nll_model
 from naver_news_api import SUPABASE_URL, SUPABASE_KEY
 
-if not SUPABASE_URL or not SUPABASE_KEY or SUPABASE_URL == "여기에_프로젝트_URL_입력":
-    print("[-] 경고: Supabase URL 또는 API Key가 설정되지 않았습니다. 환경 변수를 확인해 주세요.")
+SUPABASE_ENABLED = bool(SUPABASE_URL and SUPABASE_KEY and SUPABASE_URL != "여기에_프로젝트_URL_입력")
+if not SUPABASE_ENABLED:
+    print("[-] 경고: Supabase URL 또는 API Key가 설정되지 않았습니다. 검사 결과가 저장되지 않으며 히스토리/통계는 빈 값으로 응답합니다.")
 
 # Warm up NLL model
 nll_model, nll_threshold = get_trained_nll_model()
@@ -54,44 +54,54 @@ async def check_url(payload: CheckRequest):
         if not result:
             raise HTTPException(status_code=500, detail="기사 본문 크롤링에 실패했거나 올바르지 않은 페이지입니다.")
             
-        # Store result in Supabase Database via REST API
-        headers = get_supabase_headers()
-        
-        # Insert into checks table
-        check_data = {
-            "url": result['target_url'],
-            "title": result['target_title'],
-            "verdict": result['verdict'],
-            "contradiction_score": float(result['contradiction_score']),
-            "nll_loss": float(result['nll_loss']) if result.get('nll_loss') is not None else None,
-            "reason": result['reason'],
-            "stage": int(result['stage'])
-        }
-        
-        resp = requests.post(f"{SUPABASE_URL}/rest/v1/checks", headers=headers, json=check_data)
-        if resp.status_code != 201:
-            raise Exception(f"Supabase checks 저장 실패 (HTTP {resp.status_code}): {resp.text}")
-            
-        inserted_check = resp.json()[0]
-        check_id = inserted_check['id']
-        
-        # Insert references if present (Stage 2)
-        ref_data = []
-        for s in result.get('sources', []):
-            ref_data.append({
-                "check_id": check_id,
-                "title": s['title'],
-                "link": s['link'],
-                "description": s['description'],
-                "pub_date": s['pubDate']
-            })
-            
-        if ref_data:
-            resp_ref = requests.post(f"{SUPABASE_URL}/rest/v1/check_references", headers=headers, json=ref_data)
-            if resp_ref.status_code != 201:
-                raise Exception(f"Supabase check_references 저장 실패 (HTTP {resp_ref.status_code}): {resp_ref.text}")
-        
-        result['id'] = check_id
+        # Store result in Supabase Database via REST API.
+        # 저장 실패는 분석 결과 자체를 무효화하지 않도록 fail-soft로 처리합니다.
+        result['id'] = None
+        if SUPABASE_ENABLED:
+            try:
+                headers = get_supabase_headers()
+
+                # Insert into checks table
+                check_data = {
+                    "url": result['target_url'],
+                    "title": result['target_title'],
+                    "verdict": result['verdict'],
+                    "contradiction_score": float(result['contradiction_score']),
+                    "nll_loss": float(result['nll_loss']) if result.get('nll_loss') is not None else None,
+                    "reason": result['reason'],
+                    "stage": int(result['stage'])
+                }
+
+                resp = requests.post(f"{SUPABASE_URL}/rest/v1/checks", headers=headers, json=check_data)
+                if resp.status_code != 201:
+                    raise Exception(f"Supabase checks 저장 실패 (HTTP {resp.status_code}): {resp.text}")
+
+                inserted_check = resp.json()[0]
+                check_id = inserted_check['id']
+
+                # Insert references if present (Stage 2)
+                ref_data = []
+                for s in result.get('sources', []):
+                    ref_data.append({
+                        "check_id": check_id,
+                        "title": s['title'],
+                        "link": s['link'],
+                        "description": s['description'],
+                        "pub_date": s['pubDate']
+                    })
+
+                if ref_data:
+                    resp_ref = requests.post(f"{SUPABASE_URL}/rest/v1/check_references", headers=headers, json=ref_data)
+                    if resp_ref.status_code != 201:
+                        raise Exception(f"Supabase check_references 저장 실패 (HTTP {resp_ref.status_code}): {resp_ref.text}")
+
+                result['id'] = check_id
+            except Exception as db_err:
+                print(f"[-] 검사 결과 저장 실패 (분석 결과는 정상 반환): {db_err}")
+                result['warning'] = "검사는 완료되었지만 결과를 데이터베이스에 저장하지 못했습니다."
+        else:
+            result['warning'] = "서버에 Supabase 환경 변수가 설정되지 않아 검사 결과가 저장되지 않았습니다."
+
         return result
         
     except Exception as e:
@@ -101,6 +111,8 @@ async def check_url(payload: CheckRequest):
 
 @app.get("/api/history")
 async def get_history():
+    if not SUPABASE_ENABLED:
+        return []
     try:
         headers = get_supabase_headers()
         # Fetch checks joining with check_references as 'sources' sorting by created_at desc
@@ -115,6 +127,8 @@ async def get_history():
 
 @app.delete("/api/history/{check_id}")
 async def delete_history_item(check_id: int):
+    if not SUPABASE_ENABLED:
+        raise HTTPException(status_code=503, detail="서버에 Supabase 환경 변수가 설정되지 않아 히스토리 기능을 사용할 수 없습니다.")
     try:
         headers = get_supabase_headers()
         url = f"{SUPABASE_URL}/rest/v1/checks?id=eq.{check_id}"
@@ -128,6 +142,15 @@ async def delete_history_item(check_id: int):
 
 @app.get("/api/stats")
 async def get_stats():
+    if not SUPABASE_ENABLED:
+        return {
+            "total_checks": 0,
+            "real_count": 0,
+            "fake_count": 0,
+            "suspicious_count": 0,
+            "avg_nll": 0.0,
+            "avg_contradiction_score": 0.0
+        }
     try:
         headers = get_supabase_headers()
         # Query only the columns needed to calculate statistics (saves bandwidth)
@@ -184,6 +207,8 @@ async def get_stats():
         raise HTTPException(status_code=500, detail=f"통계 계산 실패: {str(e)}")
 
 if __name__ == "__main__":
+    # uvicorn은 로컬 개발 서버 실행에만 필요합니다 (서버리스 배포에는 불필요)
+    import uvicorn
     # Prevent print encoding issues
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
