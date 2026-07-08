@@ -8,15 +8,23 @@ from typing import List, Optional
 
 # Import our NLL RAG pipeline and credentials
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from fact_checker_by_url import check_url_validity, get_trained_nll_model
+from fact_checker_by_url import check_url_validity
 from naver_news_api import SUPABASE_URL, SUPABASE_KEY
 
 SUPABASE_ENABLED = bool(SUPABASE_URL and SUPABASE_KEY and SUPABASE_URL != "여기에_프로젝트_URL_입력")
 if not SUPABASE_ENABLED:
     print("[-] 경고: Supabase URL 또는 API Key가 설정되지 않았습니다. 검사 결과가 저장되지 않으며 히스토리/통계는 빈 값으로 응답합니다.")
 
-# Warm up NLL model
-nll_model, nll_threshold = get_trained_nll_model()
+# Lazy loading helper for NLL model
+_nll_model = None
+_nll_threshold = None
+
+def get_nll_model_lazy():
+    global _nll_model, _nll_threshold
+    if _nll_model is None:
+        from fact_checker_by_url import load_nll_model
+        _nll_model, _nll_threshold = load_nll_model()
+    return _nll_model, _nll_threshold
 
 # FastAPI App
 app = FastAPI(title="Fake News Defender Backend API", version="1.0.0")
@@ -49,6 +57,9 @@ async def check_url(payload: CheckRequest):
         raise HTTPException(status_code=400, detail="올바른 HTTP/HTTPS URL 형식을 입력해 주세요.")
         
     try:
+        # Lazy load NLL model
+        nll_model, nll_threshold = get_nll_model_lazy()
+        
         # Run the hybrid detection pipeline
         result = check_url_validity(url, nll_model, nll_threshold)
         if not result:

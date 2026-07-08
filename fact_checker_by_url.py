@@ -290,7 +290,11 @@ def fact_check_article_with_sources(target_title, target_content, sources, conte
     for i, s in enumerate(sources):
         sources_text += f"[참고 뉴스 {i+1}]\n제목: {s['title']}\n요약: {s['description']}\n출처 링크: {s['link']}\n\n"
 
+    from datetime import datetime
+    current_date = datetime.now().strftime("%Y년 %m월 %d일")
+
     prompt = (
+        f"현재 날짜: {current_date}\n"
         "당신은 가짜 뉴스와 조작된 허위 기사를 가려내는 전문 팩트체커 AI입니다.\n"
         f"아래 제공된 [검증 대상 {content_label}]의 사실 관계와, 포털 뉴스 API를 통해 실시간 검색된 공식 [참고 뉴스 기사 목록]을 상호 비교하십시오.\n\n"
         f"[검증 대상 {content_label}]\n"
@@ -448,6 +452,60 @@ def get_trained_nll_model():
         print(f"[-] NLL 모델 학습 중 에러 발생 (기본 임계값 5.6 사용): {e}")
         return None, 5.6
 
+def load_nll_model():
+    """
+    Tries to load a pre-trained NLL model from the JSON cache file.
+    If the cache does not exist, it trains the model and saves it.
+    """
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    trained_model_path = os.path.join(base_dir, "data", "nll_model_trained.json")
+    
+    if os.path.exists(trained_model_path):
+        print("\n[*] 1단계 NLL 통계 필터 로딩 중 (캐시된 모델 사용)...")
+        try:
+            import time
+            from collections import Counter
+            t0 = time.time()
+            with open(trained_model_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                
+            lm = TrigramLanguageModel()
+            lm.total_words = data["total_words"]
+            lm.vocab = set(data["vocab"])
+            threshold = data["threshold"]
+            
+            lm.unigrams = Counter(data["unigrams"])
+            lm.bigrams = Counter({(k.split("\t")[0], k.split("\t")[1]): v for k, v in data["bigrams"].items()})
+            lm.trigrams = Counter({(k.split("\t")[0], k.split("\t")[1], k.split("\t")[2]): v for k, v in data["trigrams"].items()})
+            
+            print(f"    - 캐시된 NLL 모델 로드 완료 ({time.time() - t0:.3f}초 소요, 임계값: {threshold:.4f})")
+            return lm, threshold
+        except Exception as e:
+            print(f"[-] 캐시된 NLL 모델 로드 중 에러 발생, 재학습을 시도합니다: {e}")
+            
+    # Fallback to training
+    lm, threshold = get_trained_nll_model()
+    
+    # Save cache
+    try:
+        print("[*] NLL 모델 캐시 저장 중...")
+        serialized = {
+            "total_words": lm.total_words,
+            "vocab": list(lm.vocab),
+            "threshold": threshold,
+            "unigrams": dict(lm.unigrams),
+            "bigrams": {f"{k[0]}\t{k[1]}": v for k, v in lm.bigrams.items()},
+            "trigrams": {f"{k[0]}\t{k[1]}\t{k[2]}": v for k, v in lm.trigrams.items()}
+        }
+        with open(trained_model_path, "w", encoding="utf-8") as f:
+            json.dump(serialized, f, ensure_ascii=False)
+        print(f"[+] NLL 모델 캐시 저장 완료: {trained_model_path}")
+    except Exception as e:
+        print(f"[-] NLL 모델 캐시 저장 실패: {e}")
+        
+    return lm, threshold
+
+
 def check_url_validity(url, nll_model=None, nll_threshold=5.6):
     """
     주어진 URL을 크롤링하여 팩트 체크를 전체 수행하는 핵심 파이프라인 함수
@@ -532,8 +590,8 @@ if __name__ == "__main__":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
     
-    # 1단계 NLL 모델 로딩 및 학습
-    nll_model, nll_threshold = get_trained_nll_model()
+    # 1단계 NLL 모델 로딩 및 학습 (캐시 지원)
+    nll_model, nll_threshold = load_nll_model()
     
     # 2. 테스트 구동
     if len(sys.argv) < 2:
