@@ -80,19 +80,12 @@ async def check_url(payload: CheckRequest):
                     "contradiction_score": float(result['contradiction_score']),
                     "nll_loss": float(result['nll_loss']) if result.get('nll_loss') is not None else None,
                     "reason": result['reason'],
-                    "stage": int(result['stage']),
-                    "claims_breakdown": result.get('claims_breakdown', [])
+                    "stage": int(result['stage'])
                 }
 
                 resp = requests.post(f"{SUPABASE_URL}/rest/v1/checks", headers=headers, json=check_data)
                 if resp.status_code != 201:
-                    # Fail-soft fallback: try without claims_breakdown in case column is missing
-                    if "claims_breakdown" in check_data:
-                        del check_data["claims_breakdown"]
-                        resp = requests.post(f"{SUPABASE_URL}/rest/v1/checks", headers=headers, json=check_data)
-                    
-                    if resp.status_code != 201:
-                        raise Exception(f"Supabase checks 저장 실패 (HTTP {resp.status_code}): {resp.text}")
+                    raise Exception(f"Supabase checks 저장 실패 (HTTP {resp.status_code}): {resp.text}")
 
                 inserted_check = resp.json()[0]
                 check_id = inserted_check['id']
