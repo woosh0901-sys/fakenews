@@ -257,8 +257,9 @@ async def get_rankings():
         url_titles = {}
         for r in rows:
             url_counts[r['url']] += 1
-            if r['url'] not in url_titles or r['created_at'] > url_titles[r['url']]['created_at']:
-                url_titles[r['url']] = {'title': r['title'], 'created_at': r['created_at']}
+            r_created = r.get('created_at') or ''
+            if r['url'] not in url_titles or r_created > url_titles[r['url']]['created_at']:
+                url_titles[r['url']] = {'title': r['title'], 'created_at': r_created}
                 
         most_checked = []
         for u, count in url_counts.most_common(5):
