@@ -283,7 +283,8 @@ def fact_check_article_with_sources(target_title, target_content, sources, conte
         return {
             "verdict": "SUSPICIOUS",
             "reason": "검색된 관련 신뢰 뉴스 기사가 전혀 없습니다. 신생 루머이거나 극히 폐쇄적인 커뮤니티성 허위 사실일 가능성이 높습니다.",
-            "contradiction_score": 0.8
+            "contradiction_score": 0.8,
+            "claims_breakdown": []
         }
 
     sources_text = ""
@@ -313,7 +314,14 @@ def fact_check_article_with_sources(target_title, target_content, sources, conte
         "{\n"
         '  "verdict": "REAL" | "FAKE" | "SUSPICIOUS",\n'
         '  "reason": "참고 기사와 대조 분석한 팩트 체크 판단 근거 요약 (한글로 상세 작성)",\n'
-        '  "contradiction_score": 0.0 ~ 1.0 (모순되거나 왜곡된 정도의 척도)\n'
+        '  "contradiction_score": 0.0 ~ 1.0,\n'
+        '  "claims_breakdown": [\n'
+        '    {\n'
+        '      "claim": "기사(글)에서 진술한 구체적인 핵심 정보/주장 (예: 트럼프가 벨기에로 폭격기를 전격 배치했다)",\n'
+        '      "truth": "진실" | "거짓" | "의심",\n'
+        '      "explanation": "참고 뉴스와 비교 대조했을 때 이 주장이 왜 진실/거짓/의심인지 설명"\n'
+        '    }\n'
+        '  ]\n'
         "}"
     )
     
@@ -362,7 +370,8 @@ def fact_check_article_with_sources(target_title, target_content, sources, conte
         return {
             "verdict": "SUSPICIOUS",
             "reason": reason,
-            "contradiction_score": 0.5
+            "contradiction_score": 0.5,
+            "claims_breakdown": []
         }
 
     # 로컬 Ollama 모델을 활용한 기존 폴백 로직
@@ -399,7 +408,8 @@ def fact_check_article_with_sources(target_title, target_content, sources, conte
     return {
         "verdict": "SUSPICIOUS",
         "reason": "LLM 분석 도중 기술적 오류가 발생하여 최종 판정을 유보합니다.",
-        "contradiction_score": 0.5
+        "contradiction_score": 0.5,
+        "claims_breakdown": []
     }
 
 def get_trained_nll_model():

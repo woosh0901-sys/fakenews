@@ -80,12 +80,19 @@ async def check_url(payload: CheckRequest):
                     "contradiction_score": float(result['contradiction_score']),
                     "nll_loss": float(result['nll_loss']) if result.get('nll_loss') is not None else None,
                     "reason": result['reason'],
-                    "stage": int(result['stage'])
+                    "stage": int(result['stage']),
+                    "claims_breakdown": result.get('claims_breakdown', [])
                 }
 
                 resp = requests.post(f"{SUPABASE_URL}/rest/v1/checks", headers=headers, json=check_data)
                 if resp.status_code != 201:
-                    raise Exception(f"Supabase checks 저장 실패 (HTTP {resp.status_code}): {resp.text}")
+                    # Fail-soft fallback: try without claims_breakdown in case column is missing
+                    if "claims_breakdown" in check_data:
+                        del check_data["claims_breakdown"]
+                        resp = requests.post(f"{SUPABASE_URL}/rest/v1/checks", headers=headers, json=check_data)
+                    
+                    if resp.status_code != 201:
+                        raise Exception(f"Supabase checks 저장 실패 (HTTP {resp.status_code}): {resp.text}")
 
                 inserted_check = resp.json()[0]
                 check_id = inserted_check['id']
@@ -216,6 +223,247 @@ async def get_stats():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"통계 계산 실패: {str(e)}")
+
+# --- 추가 기능 API 엔드포인트 ---
+
+class QueryRequest(BaseModel):
+    query: str
+
+class CommentRequest(BaseModel):
+    author: str
+    content: str
+
+class ReactionRequest(BaseModel):
+    emoji: str
+
+@app.get("/api/stats/rankings")
+async def get_rankings():
+    if not SUPABASE_ENABLED:
+        return {"most_checked": [], "top_fakes": []}
+    try:
+        headers = get_supabase_headers()
+        
+        # 1. Fetch checks
+        url = f"{SUPABASE_URL}/rest/v1/checks?select=url,title,verdict,contradiction_score,created_at"
+        resp = requests.get(url, headers=headers)
+        if resp.status_code != 200:
+            raise Exception(f"Supabase checks 조회 실패 (HTTP {resp.status_code}): {resp.text}")
+            
+        rows = resp.json()
+        
+        # Calculate most checked URLs
+        from collections import Counter
+        url_counts = Counter()
+        url_titles = {}
+        for r in rows:
+            url_counts[r['url']] += 1
+            if r['url'] not in url_titles or r['created_at'] > url_titles[r['url']]['created_at']:
+                url_titles[r['url']] = {'title': r['title'], 'created_at': r['created_at']}
+                
+        most_checked = []
+        for u, count in url_counts.most_common(5):
+            most_checked.append({
+                "url": u,
+                "title": url_titles[u]['title'],
+                "count": count
+            })
+            
+        # Calculate top fakes
+        fakes = [r for r in rows if r['verdict'] in ('FAKE', 'SUSPICIOUS')]
+        fakes.sort(key=lambda x: x['contradiction_score'], reverse=True)
+        
+        top_fakes = []
+        seen_urls = set()
+        for f in fakes:
+            if f['url'] not in seen_urls:
+                seen_urls.add(f['url'])
+                top_fakes.append({
+                    "url": f['url'],
+                    "title": f['title'],
+                    "contradiction_score": f['contradiction_score'],
+                    "verdict": f['verdict']
+                })
+                if len(top_fakes) >= 5:
+                    break
+                    
+        return {
+            "most_checked": most_checked,
+            "top_fakes": top_fakes
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"랭킹 조회 실패: {str(e)}")
+
+@app.post("/api/check/{check_id}/query")
+async def query_check(check_id: int, payload: QueryRequest):
+    user_query = payload.query.strip()
+    if not user_query:
+        raise HTTPException(status_code=400, detail="질문 내용을 입력해 주세요.")
+        
+    if not SUPABASE_ENABLED:
+        raise HTTPException(status_code=503, detail="Supabase 설정이 되지 않아 기사 정보를 찾을 수 없습니다.")
+        
+    try:
+        headers = get_supabase_headers()
+        
+        # 1. Fetch check info
+        url = f"{SUPABASE_URL}/rest/v1/checks?id=eq.{check_id}"
+        resp = requests.get(url, headers=headers)
+        if resp.status_code != 200 or not resp.json():
+            raise HTTPException(status_code=404, detail="해당 검사 기사를 찾을 수 없습니다.")
+        check_item = resp.json()[0]
+        
+        # 2. Run real-time hybrid search for the query
+        from fact_checker_by_url import fetch_hybrid_news
+        print(f"[*] 추가 분석 실시간 웹 검색 실행 중: {user_query}")
+        sources = fetch_hybrid_news(user_query, display_count=3)
+        
+        sources_text = ""
+        for i, s in enumerate(sources):
+            sources_text += f"[참고 자료 {i+1}]\n제목: {s['title']}\n내용 요약: {s['description']}\n링크: {s['link']}\n\n"
+            
+        # 3. Build Gemini prompt
+        from datetime import datetime
+        current_date = datetime.now().strftime("%Y년 %m월 %d일")
+        
+        prompt = (
+            f"현재 날짜: {current_date}\n"
+            "당신은 가짜 뉴스를 전문적으로 판정하는 팩트체커 AI입니다.\n"
+            "사용자가 검증 기사 본문에 대해 추가로 질문했습니다. 제공된 [검증 대상 기사]와 [추가 검색된 참고 자료]를 기반으로 사용자의 질문에 상세하고 객관적으로 답변해 주세요.\n\n"
+            "[검증 대상 기사]\n"
+            f"제목: {check_item['title']}\n"
+            f"검증 내용 요약: {check_item['reason']}\n\n"
+            "[사용자의 질문]\n"
+            f"{user_query}\n\n"
+            "[추가 검색된 참고 자료 목록]\n"
+            f"{sources_text if sources_text else '검색된 관련 기사가 없습니다.'}\n"
+            "답변 지침:\n"
+            "1. 질문 내용이 사실(True)인지 거짓(False)인지 혹은 판단이 불가한지 명확히 답하고 근거를 서술해 주세요.\n"
+            "2. 대조군 자료를 바탕으로 신뢰할 수 있게 설명하세요.\n"
+            "3. 한글로 상세하지만 간결하게 3~4문장 정도로 답변을 완성하세요.\n"
+            "4. 반드시 마크다운이나 JSON 기호 없이 일반 평서문 텍스트로만 답변해 주세요."
+        )
+        
+        from fact_checker_by_url import GEMINI_API_KEY
+        
+        answer = "LLM 연동이 되어 있지 않아 추가 질문에 대한 분석을 진행할 수 없습니다."
+        
+        if GEMINI_API_KEY and GEMINI_API_KEY.strip() and GEMINI_API_KEY.strip() != "YOUR_GEMINI_API_KEY":
+            g_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY.strip()}"
+            g_headers = {"Content-Type": "application/json"}
+            g_payload = {
+                "contents": [{"parts": [{"text": prompt}]}]
+            }
+            resp_g = requests.post(g_url, headers=g_headers, json=g_payload, timeout=25)
+            if resp_g.status_code == 200:
+                g_data = resp_g.json()
+                answer = g_data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            else:
+                answer = f"Gemini API 호출에 실패했습니다. (HTTP {resp_g.status_code})"
+        else:
+            answer = "서버에 GEMINI_API_KEY 환경 변수가 설정되지 않아 실시간 AI 답변 기능을 제공할 수 없습니다."
+            
+        return {
+            "query": user_query,
+            "answer": answer,
+            "sources": sources
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"추가 분석 실패: {str(e)}")
+
+@app.get("/api/history/{check_id}/comments")
+async def get_comments(check_id: int):
+    if not SUPABASE_ENABLED:
+        return []
+    try:
+        headers = get_supabase_headers()
+        url = f"{SUPABASE_URL}/rest/v1/check_comments?check_id=eq.{check_id}&order=created_at.asc"
+        resp = requests.get(url, headers=headers)
+        if resp.status_code != 200:
+            raise Exception(f"Supabase 댓글 조회 실패 (HTTP {resp.status_code}): {resp.text}")
+        return resp.json()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"댓글 조회 실패: {str(e)}")
+
+@app.post("/api/history/{check_id}/comments")
+async def add_comment(check_id: int, payload: CommentRequest):
+    author = payload.author.strip() or "익명"
+    content = payload.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="댓글 내용을 입력해 주세요.")
+        
+    if not SUPABASE_ENABLED:
+        raise HTTPException(status_code=503, detail="Supabase 설정이 필요합니다.")
+        
+    try:
+        headers = get_supabase_headers()
+        comment_data = {
+            "check_id": check_id,
+            "author": author,
+            "content": content
+        }
+        resp = requests.post(f"{SUPABASE_URL}/rest/v1/check_comments", headers=headers, json=comment_data)
+        if resp.status_code != 201:
+            raise Exception(f"Supabase 댓글 저장 실패 (HTTP {resp.status_code}): {resp.text}")
+        return resp.json()[0]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"댓글 저장 실패: {str(e)}")
+
+@app.get("/api/history/{check_id}/reactions")
+async def get_reactions(check_id: int):
+    if not SUPABASE_ENABLED:
+        return []
+    try:
+        headers = get_supabase_headers()
+        url = f"{SUPABASE_URL}/rest/v1/check_reactions?check_id=eq.{check_id}"
+        resp = requests.get(url, headers=headers)
+        if resp.status_code != 200:
+            raise Exception(f"Supabase 리액션 조회 실패 (HTTP {resp.status_code}): {resp.text}")
+        return resp.json()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"리액션 조회 실패: {str(e)}")
+
+@app.post("/api/history/{check_id}/reactions")
+async def add_reaction(check_id: int, payload: ReactionRequest):
+    emoji = payload.emoji.strip()
+    if not emoji:
+        raise HTTPException(status_code=400, detail="이모지가 없습니다.")
+        
+    if not SUPABASE_ENABLED:
+        raise HTTPException(status_code=503, detail="Supabase 설정이 필요합니다.")
+        
+    try:
+        headers = get_supabase_headers()
+        
+        # 1. Fetch existing reaction
+        url = f"{SUPABASE_URL}/rest/v1/check_reactions?check_id=eq.{check_id}&emoji=eq.{emoji}"
+        resp_get = requests.get(url, headers=headers)
+        
+        if resp_get.status_code == 200 and resp_get.json():
+            # Exist -> update count + 1
+            existing = resp_get.json()[0]
+            new_count = int(existing['count']) + 1
+            update_url = f"{SUPABASE_URL}/rest/v1/check_reactions?id=eq.{existing['id']}"
+            resp_up = requests.patch(update_url, headers=headers, json={"count": new_count})
+            if resp_up.status_code not in (200, 204):
+                raise Exception(f"Supabase 리액션 수정 실패 (HTTP {resp_up.status_code}): {resp_up.text}")
+            
+            existing['count'] = new_count
+            return existing
+        else:
+            # Not exist -> insert
+            reaction_data = {
+                "check_id": check_id,
+                "emoji": emoji,
+                "count": 1
+            }
+            resp_in = requests.post(f"{SUPABASE_URL}/rest/v1/check_reactions", headers=headers, json=reaction_data)
+            if resp_in.status_code != 201:
+                raise Exception(f"Supabase 리액션 저장 실패 (HTTP {resp_in.status_code}): {resp_in.text}")
+            return resp_in.json()[0]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"리액션 저장 실패: {str(e)}")
 
 if __name__ == "__main__":
     # uvicorn은 로컬 개발 서버 실행에만 필요합니다 (서버리스 배포에는 불필요)
