@@ -109,7 +109,7 @@ async def check_url(payload: CheckRequest):
                 result['id'] = check_id
             except Exception as db_err:
                 print(f"[-] 검사 결과 저장 실패 (분석 결과는 정상 반환): {db_err}")
-                result['warning'] = "검사는 완료되었지만 결과를 데이터베이스에 저장하지 못했습니다."
+                result['warning'] = f"검사는 완료되었지만 결과를 데이터베이스에 저장하지 못했습니다. (오류: {str(db_err)})"
         else:
             result['warning'] = "서버에 Supabase 환경 변수가 설정되지 않아 검사 결과가 저장되지 않았습니다."
 
