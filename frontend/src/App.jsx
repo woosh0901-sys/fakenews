@@ -275,7 +275,7 @@ export default function App() {
               
               <div className="max-w-2xl">
                 <h2 className="text-xl font-bold tracking-tight text-zinc-950 dark:text-zinc-50">인공지능 교차 검증 시작하기</h2>
-                <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1 font-medium">분석할 신문 기사나 SNS 보도 주소(URL)를 입력하면 1차 통계 문맥 검사 및 2차 실시간 웹 보도 대조를 진행합니다.</p>
+                <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1 font-medium">분석할 신문 기사나 인스타그램 공개 게시물 주소(URL)를 입력하면 1차 통계 문맥 검사 및 2차 실시간 웹 보도 대조를 진행합니다. (인스타그램은 캡션 기반으로 바로 2차 정밀 검증)</p>
               </div>
 
               <form onSubmit={handleCheck} className="flex gap-2.5 mt-5">
@@ -284,7 +284,7 @@ export default function App() {
                     type="url" 
                     value={urlInput}
                     onChange={(e) => setUrlInput(e.target.value)}
-                    placeholder="검증하려는 기사 링크(https://...)를 입력해 주세요."
+                    placeholder="검증하려는 기사 또는 인스타그램 게시물 링크(https://...)를 입력해 주세요."
                     required
                     disabled={loading}
                     className="w-full bg-zinc-50 dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-xl pl-11 pr-4 py-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all text-zinc-950 dark:text-zinc-100 shadow-inner"
