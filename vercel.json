@@ -2,7 +2,8 @@
   "outputDirectory": "frontend/dist",
   "functions": {
     "api/index.py": {
-      "includeFiles": "data/**"
+      "includeFiles": "data/**",
+      "maxDuration": 60
     }
   },
   "rewrites": [

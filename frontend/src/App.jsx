@@ -100,7 +100,12 @@ export default function App() {
         setUrlInput("");
         setLoading(false);
         await loadData();
-        setSelectedItem(res.data);
+        // /api/check 응답은 target_title/target_url 키를 사용하므로 패널 표시용 필드로 정규화
+        setSelectedItem({
+          ...res.data,
+          title: res.data.title ?? res.data.target_title,
+          url: res.data.url ?? res.data.target_url,
+        });
       }, 500);
       
     } catch (err) {
@@ -447,9 +452,11 @@ export default function App() {
                     <p className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">정밀 진단 레포트</p>
                     <div className="flex items-center gap-2">
                       {getVerdictBadge(selectedItem.verdict)}
-                      <span className="text-xs bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 px-2 py-0.5 rounded font-mono font-bold">
-                        #{selectedItem.id}
-                      </span>
+                      {selectedItem.id != null && (
+                        <span className="text-xs bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 px-2 py-0.5 rounded font-mono font-bold">
+                          #{selectedItem.id}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <button 
@@ -520,6 +527,13 @@ export default function App() {
                     </span>
                   </div>
                 </div>
+
+                {/* Server-side warning (e.g. DB 저장 실패) */}
+                {selectedItem.warning && (
+                  <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-xl p-3 text-[11px] text-amber-700 dark:text-amber-300 font-semibold">
+                    ⚠️ {selectedItem.warning}
+                  </div>
+                )}
 
                 {/* Verdict explanation card */}
                 <div className="space-y-2">
