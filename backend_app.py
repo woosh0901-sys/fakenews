@@ -11,6 +11,16 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from fact_checker_by_url import check_url_validity
 from naver_news_api import SUPABASE_URL, SUPABASE_KEY
 
+# Clean SUPABASE_URL to make sure it doesn't end with /rest/v1 or /rest/v1/ (prevent path doubling)
+if SUPABASE_URL:
+    SUPABASE_URL = SUPABASE_URL.strip()
+    if SUPABASE_URL.endswith("/rest/v1"):
+        SUPABASE_URL = SUPABASE_URL[:-8]
+    elif SUPABASE_URL.endswith("/rest/v1/"):
+        SUPABASE_URL = SUPABASE_URL[:-9]
+    if SUPABASE_URL.endswith("/"):
+        SUPABASE_URL = SUPABASE_URL[:-1]
+
 SUPABASE_ENABLED = bool(SUPABASE_URL and SUPABASE_KEY and SUPABASE_URL != "여기에_프로젝트_URL_입력")
 if not SUPABASE_ENABLED:
     print("[-] 경고: Supabase URL 또는 API Key가 설정되지 않았습니다. 검사 결과가 저장되지 않으며 히스토리/통계는 빈 값으로 응답합니다.")
