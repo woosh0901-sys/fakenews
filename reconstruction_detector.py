@@ -87,37 +87,27 @@ class TrigramLanguageModel:
     # Calculates Negative Log-Likelihood (Reconstruction Loss) for a sentence
     def calculate_sentence_loss(self, tokens):
         if not tokens:
-            return 0.0, []
+            return 0.0
             
         padded = ['<s>', '<s>'] + tokens + ['</s>']
         total_log_prob = 0.0
         n_transitions = len(padded) - 2
         
         word_losses = []
-        valid_transitions = 0
         
         for i in range(n_transitions):
             w1, w2, w3 = padded[i], padded[i+1], padded[i+2]
-            
-            # Skip transition if the target word is completely unseen (OOV) to prevent vocabulary shift from inflating NLL
-            if w3 != '</s>' and w3 not in self.unigrams:
-                continue
-                
             prob = self.get_probability(w1, w2, w3)
             # Clip probability to avoid log(0)
             prob = max(prob, 1e-10)
             token_loss = -math.log(prob)
             total_log_prob += token_loss
-            valid_transitions += 1
             
             if w3 != '</s>':
                 word_losses.append((w3, round(token_loss, 4)))
                 
         # Return average NLL (loss) per token and step-by-step losses
-        if valid_transitions == 0:
-            return 0.0, word_losses
-            
-        avg_loss = total_log_prob / valid_transitions
+        avg_loss = total_log_prob / n_transitions
         return avg_loss, word_losses
 
 def main():
