@@ -93,7 +93,7 @@ export default function Landing({ darkMode, setDarkMode, history, onSubmit, onOp
       {/* 중앙 히어로 */}
       <main className="flex-1 flex flex-col items-center justify-center px-6 pb-16 -mt-8">
         {/* 아이브로: Figma = SUIT Regular 36px, 네이비→그린 그라디언트 */}
-        <p className="text-xl md:text-[26px] font-normal bg-clip-text text-transparent bg-gradient-to-r from-brand-400 to-secondary-600">
+        <p className="text-xl md:text-[26px] font-normal bg-clip-text text-transparent bg-gradient-to-r from-brand-300 to-secondary-600">
           그 기사.. 팩트일까요?
         </p>
         {/* 헤드라인: Figma = SUIT Heavy 64px, 네이비(0%)→블루(71%) 그라디언트, 다크 모드도 동일 색상 */}
@@ -155,20 +155,18 @@ export default function Landing({ darkMode, setDarkMode, history, onSubmit, onOp
                       className="flex items-center justify-center gap-2 min-w-0 w-full group"
                     >
                       <span
-                        className={`shrink-0 font-bold ${
-                          idx === 0
+                        className={`shrink-0 font-bold ${idx === 0
                             ? "text-sm text-info-600 dark:text-info-400"
                             : "text-xs text-info-500 dark:text-info-400"
-                        }`}
+                          }`}
                       >
                         {item.rank}
                       </span>
                       <span
-                        className={`truncate group-hover:underline ${
-                          idx === 0
+                        className={`truncate group-hover:underline ${idx === 0
                             ? "text-sm font-bold text-neutral-900 dark:text-neutral-100"
                             : "text-xs font-medium text-neutral-700 dark:text-neutral-300"
-                        }`}
+                          }`}
                       >
                         {item.title}
                       </span>
