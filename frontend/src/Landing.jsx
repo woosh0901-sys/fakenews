@@ -91,34 +91,36 @@ export default function Landing({ darkMode, setDarkMode, history, onSubmit, onOp
       </header>
 
       {/* 중앙 히어로 */}
-      <main className="flex-1 flex flex-col items-center justify-center px-6 pb-24 -mt-8">
-        <p className="text-sm md:text-base font-bold text-secondary-600 dark:text-secondary-400">
+      <main className="flex-1 flex flex-col items-center justify-center px-6 pb-16 -mt-8">
+        {/* 아이브로: Figma = SUIT Regular 36px, 네이비→그린 그라디언트 */}
+        <p className="text-xl md:text-[26px] font-normal bg-clip-text text-transparent bg-gradient-to-r from-brand-400 to-secondary-600">
           그 기사.. 팩트일까요?
         </p>
-        <h2 className="mt-2 text-3xl md:text-5xl font-bold tracking-tight text-info-700 dark:text-info-400 text-center leading-tight">
+        {/* 헤드라인: Figma = SUIT Heavy 64px, 네이비(0%)→블루(71%) 그라디언트, 다크 모드도 동일 색상 */}
+        <h2 className="mt-2 text-4xl md:text-5xl font-black tracking-tight text-center leading-tight bg-clip-text text-transparent bg-gradient-to-r from-brand-500 from-0% to-info-600 to-[71%]">
           AI에게 팩트를 체크해보세요.
         </h2>
 
         {/* 알약형 검색 입력 + 내장 검증하기 버튼 */}
-        <form onSubmit={handleSubmit} className="mt-9 w-full max-w-2xl relative">
+        <form onSubmit={handleSubmit} className="mt-8 w-full max-w-2xl relative">
           <input
             type="url"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="검증하려는 기사, 인스타그램·X(트위터) 게시물 링크를 입력해 주세요."
             required
-            className="w-full bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-full pl-6 pr-30 py-4 text-sm shadow-md focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 dark:focus:ring-brand-400/30 dark:focus:border-brand-400 transition-all text-neutral-950 dark:text-neutral-100"
+            className="w-full h-14 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-full pl-6 pr-30 text-sm shadow-md dark:shadow-[0_0_28px_rgba(255,255,255,0.10)] focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 dark:focus:ring-brand-400/30 dark:focus:border-brand-400 transition-all text-neutral-950 dark:text-neutral-100"
           />
           <button
             type="submit"
-            className="absolute right-2 top-1/2 -translate-y-1/2 bg-brand-500 hover:bg-brand-600 active:bg-brand-700 text-white text-sm font-bold px-6 py-2.5 rounded-full transition-colors shadow-sm shadow-brand-500/10"
+            className="absolute right-2 top-1/2 -translate-y-1/2 h-10 bg-brand-500 hover:bg-brand-600 active:bg-brand-700 text-white text-sm font-bold px-7 rounded-full transition-colors shadow-sm shadow-brand-500/10 dark:shadow-[0_0_16px_rgba(255,255,255,0.12)]"
           >
             검증하기
           </button>
         </form>
 
         {/* 실시간 가장 많이 검증된 기사 (Top 5) 티커 */}
-        <section className="mt-12 w-full max-w-xl">
+        <section className="mt-8 w-full max-w-xl">
           <p className="flex items-center justify-center gap-1.5 text-xs font-bold text-neutral-700 dark:text-neutral-300">
             <TrendingUp size={14} className="text-info-600 dark:text-info-400" />
             실시간 가장 많이 검증된 기사 (Top 5)
@@ -127,7 +129,7 @@ export default function Landing({ darkMode, setDarkMode, history, onSubmit, onOp
           <div
             onMouseEnter={() => setPaused(true)}
             onMouseLeave={() => setPaused(false)}
-            className="mt-3 bg-white dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 rounded-lg shadow-md px-6 py-5 overflow-hidden"
+            className="mt-4 bg-white dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 rounded-lg shadow-md dark:shadow-[0_0_32px_rgba(255,255,255,0.08)] px-6 py-5 overflow-hidden"
           >
             {topArticles.length === 0 ? (
               <p className="text-xs text-neutral-400 text-center py-4 font-medium">
@@ -142,30 +144,34 @@ export default function Landing({ darkMode, setDarkMode, history, onSubmit, onOp
                 {rotated.map((item, idx) => (
                   <li
                     key={`${item.rank}-${item.url}`}
-                    className="flex items-center justify-center gap-2 min-w-0"
                     style={{ opacity: ROW_OPACITY[idx] ?? 0.28 }}
                   >
-                    <span
-                      className={`shrink-0 font-bold ${
-                        idx === 0
-                          ? "text-sm text-info-600 dark:text-info-400"
-                          : "text-xs text-info-500 dark:text-info-400"
-                      }`}
-                    >
-                      {item.rank}
-                    </span>
+                    {/* 행 전체가 클릭 영역 */}
                     <a
                       href={item.url}
                       target="_blank"
                       rel="noreferrer"
                       title={item.title}
-                      className={`truncate hover:underline ${
-                        idx === 0
-                          ? "text-sm font-bold text-neutral-900 dark:text-neutral-100"
-                          : "text-xs font-semibold text-neutral-700 dark:text-neutral-300"
-                      }`}
+                      className="flex items-center justify-center gap-2 min-w-0 w-full group"
                     >
-                      {item.title}
+                      <span
+                        className={`shrink-0 font-bold ${
+                          idx === 0
+                            ? "text-sm text-info-600 dark:text-info-400"
+                            : "text-xs text-info-500 dark:text-info-400"
+                        }`}
+                      >
+                        {item.rank}
+                      </span>
+                      <span
+                        className={`truncate group-hover:underline ${
+                          idx === 0
+                            ? "text-sm font-bold text-neutral-900 dark:text-neutral-100"
+                            : "text-xs font-medium text-neutral-700 dark:text-neutral-300"
+                        }`}
+                      >
+                        {item.title}
+                      </span>
                     </a>
                   </li>
                 ))}
