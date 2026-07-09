@@ -21,7 +21,11 @@ import {
   ArrowRight,
   TrendingDown,
   Globe,
-  Clock
+  Clock,
+  MessageSquare,
+  Send,
+  Check,
+  AlertCircle
 } from "lucide-react";
 
 const API_BASE_URL = "/api";
@@ -51,6 +55,27 @@ export default function App() {
     avg_contradiction_score: 0
   });
 
+  // New Feature States
+  const [rankings, setRankings] = useState({ most_checked: [], top_fakes: [] });
+  const [comments, setComments] = useState([]);
+  const [reactions, setReactions] = useState([]);
+  const [chatHistory, setChatHistory] = useState([]);
+  const [commentAuthor, setCommentAuthor] = useState("");
+  const [commentContent, setCommentContent] = useState("");
+  const [chatInput, setChatInput] = useState("");
+  const [loadingChat, setLoadingChat] = useState(false);
+  
+  // Persistent anonymous user identity
+  const [userToken, setUserToken] = useState(() => {
+    let token = localStorage.getItem("user_token");
+    if (!token) {
+      token = "user_" + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      localStorage.setItem("user_token", token);
+    }
+    return token;
+  });
+  const [userReactions, setUserReactions] = useState({});
+
   // Apply theme class
   useEffect(() => {
     if (darkMode) {
@@ -62,6 +87,16 @@ export default function App() {
     }
   }, [darkMode]);
 
+  // Load rankings
+  const loadRankings = async () => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/stats/rankings`);
+      setRankings(res.data);
+    } catch (err) {
+      console.error("랭킹 로드 실패:", err);
+    }
+  };
+
   // Load history and stats
   const loadData = async () => {
     try {
@@ -71,6 +106,7 @@ export default function App() {
       ]);
       setHistory(historyRes.data);
       setStats(statsRes.data);
+      loadRankings();
     } catch (err) {
       console.error("데이터 로드 오류:", err);
     }
@@ -80,9 +116,40 @@ export default function App() {
     loadData();
   }, []);
 
+  // Load comments, reactions, and chat history when selectedItem changes
+  useEffect(() => {
+    if (!selectedItem) {
+      setComments([]);
+      setReactions([]);
+      setChatHistory([]);
+      setUserReactions({});
+      return;
+    }
+    
+    const loadItemDetails = async () => {
+      try {
+        const [commentsRes, reactionsRes] = await Promise.all([
+          axios.get(`${API_BASE_URL}/history/${selectedItem.id}/comments`),
+          axios.get(`${API_BASE_URL}/history/${selectedItem.id}/reactions`)
+        ]);
+        setComments(commentsRes.data);
+        setReactions(reactionsRes.data);
+        setChatHistory([]);
+        
+        // Load user's local reactions for this item
+        const savedReactions = JSON.parse(localStorage.getItem(`reacted_${selectedItem.id}`) || "{}");
+        setUserReactions(savedReactions);
+      } catch (err) {
+        console.error("댓글/리액션 로드 실패:", err);
+      }
+    };
+    
+    loadItemDetails();
+  }, [selectedItem]);
+
   // 검증 실행 (대시보드 폼과 랜딩 페이지 양쪽에서 사용)
   const runCheck = async (targetUrl) => {
-    if (!targetUrl.trim()) return;
+    if (loading || !targetUrl.trim()) return;
 
     setLoading(true);
     setActiveStep(1);
@@ -147,6 +214,121 @@ export default function App() {
     }
   };
 
+  const handleAddComment = async (e) => {
+    e.preventDefault();
+    if (!commentContent.trim() || !selectedItem) return;
+    
+    if (selectedItem.id === null || selectedItem.id === undefined) {
+      alert("데이터베이스에 저장되지 않은 검사 결과에는 댓글을 남길 수 없습니다. (Supabase 연결 상태나 환경 변수 설정 (.env)을 확인해 주세요.)");
+      return;
+    }
+    
+    const author = commentAuthor.trim() || "익명";
+    try {
+      const res = await axios.post(`${API_BASE_URL}/history/${selectedItem.id}/comments`, {
+        author,
+        content: commentContent,
+        user_token: userToken
+      });
+      setComments([...comments, res.data]);
+      setCommentContent("");
+    } catch (err) {
+      const errMsg = err.response?.data?.detail || err.message || "알 수 없는 에러";
+      alert("댓글 저장 실패: " + errMsg);
+    }
+  };
+
+  const handleDeleteComment = async (commentId) => {
+    if (!selectedItem) return;
+    if (!confirm("정말 이 댓글을 삭제하시겠습니까?")) return;
+    try {
+      await axios.delete(`${API_BASE_URL}/history/${selectedItem.id}/comments/${commentId}`, {
+        params: { user_token: userToken }
+      });
+      setComments(comments.filter(c => c.id !== commentId));
+    } catch (err) {
+      const errMsg = err.response?.data?.detail || err.message || "삭제 실패";
+      alert("댓글 삭제 실패: " + errMsg);
+    }
+  };
+
+  const handleAddReaction = async (emoji) => {
+    if (!selectedItem) return;
+    
+    if (selectedItem.id === null || selectedItem.id === undefined) {
+      alert("데이터베이스에 저장되지 않은 검사 결과에는 리액션을 남길 수 없습니다. (Supabase 연결 상태나 환경 변수 설정 (.env)을 확인해 주세요.)");
+      return;
+    }
+    
+    const isAlreadyReacted = !!userReactions[emoji];
+    
+    try {
+      const res = await axios.post(`${API_BASE_URL}/history/${selectedItem.id}/reactions`, {
+        emoji,
+        is_canceling: isAlreadyReacted
+      });
+      
+      const updatedUserReactions = { ...userReactions };
+      if (isAlreadyReacted) {
+        delete updatedUserReactions[emoji];
+      } else {
+        updatedUserReactions[emoji] = true;
+      }
+      setUserReactions(updatedUserReactions);
+      localStorage.setItem(`reacted_${selectedItem.id}`, JSON.stringify(updatedUserReactions));
+      
+      const updatedReactions = [...reactions];
+      const idx = updatedReactions.findIndex(r => r.emoji === emoji);
+      if (idx > -1) {
+        updatedReactions[idx].count = res.data.count;
+      } else {
+        updatedReactions.push(res.data);
+      }
+      setReactions(updatedReactions);
+    } catch (err) {
+      const errMsg = err.response?.data?.detail || err.message || "알 수 없는 에러";
+      alert("리액션 저장 실패: " + errMsg);
+    }
+  };
+
+  const handleChatSubmit = async (e) => {
+    e.preventDefault();
+    if (!chatInput.trim() || loadingChat || !selectedItem) return;
+    
+    if (selectedItem.id === null || selectedItem.id === undefined) {
+      alert("데이터베이스에 저장되지 않은 검사 결과에는 Q&A 질문을 할 수 없습니다. (Supabase 연결 상태나 환경 변수 설정 (.env)을 확인해 주세요.)");
+      return;
+    }
+    
+    const query = chatInput.trim();
+    setChatInput("");
+    setLoadingChat(true);
+    
+    const tempChat = [...chatHistory, { query, answer: null, loading: true }];
+    setChatHistory(tempChat);
+    
+    try {
+      const res = await axios.post(`${API_BASE_URL}/check/${selectedItem.id}/query`, {
+        query
+      });
+      
+      setChatHistory(prev => prev.map(item => 
+        item.query === query && item.loading 
+          ? { query, answer: res.data.answer, loading: false } 
+          : item
+      ));
+    } catch (err) {
+      const errMsg = err.response?.data?.detail || err.message || "추가 분석 중 에러가 발생했습니다.";
+      setChatHistory(prev => prev.map(item => 
+        item.query === query && item.loading 
+          ? { query, answer: `추가 분석 중 에러가 발생했습니다. (이유: ${errMsg})`, loading: false } 
+          : item
+      ));
+    } finally {
+      setLoadingChat(false);
+    }
+  };
+
   // Badge helpers
   const getVerdictBadge = (verdict) => {
     switch (verdict) {
@@ -190,6 +372,7 @@ export default function App() {
         darkMode={darkMode}
         setDarkMode={setDarkMode}
         history={history}
+        loading={loading}
         onSubmit={handleLandingSubmit}
         onOpenDashboard={() => setView("dashboard")}
       />
@@ -388,6 +571,79 @@ export default function App() {
               )}
             </section>
 
+            {/* Real-time Rankings Grid */}
+            <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              
+              {/* Most Checked Rankings */}
+              <div className="bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800/80 rounded-2xl p-5 shadow-sm space-y-4">
+                <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+                  <TrendingUp size={16} className="text-blue-500" />
+                  실시간 가장 많이 검증된 기사 (Top 5)
+                </h3>
+                <div className="space-y-2.5">
+                  {rankings.most_checked.length === 0 ? (
+                    <p className="text-xs text-zinc-400 py-4 text-center">검증 통계가 없습니다.</p>
+                  ) : (
+                    rankings.most_checked.map((item, idx) => (
+                      <div 
+                        key={idx}
+                        onClick={() => {
+                          const matched = history.find(h => h.url === item.url);
+                          if (matched) setSelectedItem(matched);
+                        }}
+                        className="flex items-center justify-between text-xs p-3 bg-zinc-50/50 dark:bg-zinc-900/30 border border-zinc-100 dark:border-zinc-800/50 rounded-xl hover:border-zinc-300 dark:hover:border-zinc-700 cursor-pointer transition-all"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="font-mono font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/20 px-2 py-0.5 rounded text-[10px]">
+                            {idx + 1}
+                          </span>
+                          <span className="font-bold text-zinc-900 dark:text-zinc-100 truncate flex-1 block leading-tight">{item.title}</span>
+                        </div>
+                        <span className="text-[10px] text-zinc-400 shrink-0 font-bold bg-zinc-100 dark:bg-zinc-800/80 px-2 py-0.5 rounded-full">
+                          {item.count}회
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Top Fakes Rankings */}
+              <div className="bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800/80 rounded-2xl p-5 shadow-sm space-y-4">
+                <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+                  <AlertTriangle size={16} className="text-rose-500" />
+                  실시간 모순율이 가장 높은 거짓 기사 (Top 5)
+                </h3>
+                <div className="space-y-2.5">
+                  {rankings.top_fakes.length === 0 ? (
+                    <p className="text-xs text-zinc-400 py-4 text-center">검출된 거짓 기사가 없습니다.</p>
+                  ) : (
+                    rankings.top_fakes.map((item, idx) => (
+                      <div 
+                        key={idx}
+                        onClick={() => {
+                          const matched = history.find(h => h.url === item.url);
+                          if (matched) setSelectedItem(matched);
+                        }}
+                        className="flex items-center justify-between text-xs p-3 bg-rose-50/10 dark:bg-rose-950/5 border border-rose-100/30 dark:border-rose-950/20 rounded-xl hover:border-zinc-300 dark:hover:border-zinc-700 cursor-pointer transition-all"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="font-mono font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/20 px-2 py-0.5 rounded text-[10px]">
+                            {idx + 1}
+                          </span>
+                          <span className="font-bold text-zinc-900 dark:text-zinc-100 truncate flex-1 block leading-tight">{item.title}</span>
+                        </div>
+                        <span className="text-[10px] text-rose-500 shrink-0 font-bold bg-rose-50 dark:bg-rose-950/30 px-2 py-0.5 rounded-full">
+                          모순율 {(item.contradiction_score * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+            </section>
+
             {/* History Table Container */}
             <section className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800/80 rounded-lg shadow-sm overflow-hidden">
               <div className="p-5 border-b border-neutral-200 dark:border-neutral-800/60 flex items-center justify-between">
@@ -576,6 +832,195 @@ export default function App() {
                   <div className="bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-800 rounded-lg p-4 text-xs text-neutral-700 dark:text-neutral-300 leading-relaxed font-semibold">
                     {selectedItem.reason}
                   </div>
+                </div>
+
+                {/* Claims Breakdown (진실/거짓 요소별 분류) */}
+                {selectedItem.claims_breakdown && selectedItem.claims_breakdown.length > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest flex items-center gap-1.5">
+                      <Layers size={14} className="text-zinc-400" /> 요소별 세부 검증 (진실/거짓 분류)
+                    </h4>
+                    <div className="space-y-2">
+                      {selectedItem.claims_breakdown.map((item, idx) => {
+                        const isTrue = item.truth === "진실";
+                        const isFalse = item.truth === "거짓";
+                        return (
+                          <div 
+                            key={idx} 
+                            className="bg-zinc-50 dark:bg-[#15151a] border border-zinc-200/60 dark:border-zinc-800 rounded-xl p-3.5 text-xs space-y-1.5 shadow-sm"
+                          >
+                            <div className="flex items-center gap-2">
+                              {isTrue ? (
+                                <span className="flex items-center gap-1 text-[10px] bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-200/60 dark:border-emerald-950/30 px-2 py-0.5 rounded-full shrink-0">
+                                  <Check size={10} /> {item.truth}
+                                </span>
+                              ) : isFalse ? (
+                                <span className="flex items-center gap-1 text-[10px] bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 font-bold border border-rose-200/60 dark:border-rose-950/30 px-2 py-0.5 rounded-full shrink-0">
+                                  <X size={10} /> {item.truth}
+                                </span>
+                              ) : (
+                                <span className="flex items-center gap-1 text-[10px] bg-amber-50 dark:bg-amber-950/20 text-amber-600 dark:text-amber-400 font-bold border border-amber-200/60 dark:border-amber-950/30 px-2 py-0.5 rounded-full shrink-0">
+                                  <AlertCircle size={10} /> {item.truth}
+                                </span>
+                              )}
+                              <h5 className="font-bold text-zinc-950 dark:text-zinc-100 leading-tight flex-1">{item.claim}</h5>
+                            </div>
+                            <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed font-medium pl-1">{item.explanation}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Q&A Interactive Deep Analysis */}
+                <div className="space-y-3 pt-2 border-t border-zinc-100 dark:border-zinc-800/80">
+                  <h4 className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest flex items-center gap-1.5">
+                    <HelpCircle size={14} className="text-zinc-400" /> 심층 질문 및 추가 검증
+                  </h4>
+                  
+                  {/* Chat logs */}
+                  <div className="space-y-2.5 max-h-[220px] overflow-y-auto pr-1">
+                    {chatHistory.length === 0 ? (
+                      <p className="text-[11px] text-zinc-400/80 italic font-medium pl-1">이 기사에서 더 알고 싶은 사실이 있다면 아래에 질문해 보세요. (예: &quot;진짜 벨기에로 전투기 출격했나?&quot;)</p>
+                    ) : (
+                      chatHistory.map((chat, idx) => (
+                        <div key={idx} className="space-y-1.5">
+                          <div className="flex justify-end">
+                            <span className="bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 px-3 py-1.5 rounded-2xl rounded-tr-none text-xs font-bold shadow-sm max-w-[85%]">
+                              {chat.query}
+                            </span>
+                          </div>
+                          <div className="flex justify-start">
+                            <div className="bg-blue-50/50 dark:bg-blue-950/10 border border-blue-100/30 dark:border-blue-950/20 text-zinc-800 dark:text-zinc-200 px-3 py-2 rounded-2xl rounded-tl-none text-xs font-semibold shadow-sm max-w-[85%] leading-relaxed">
+                              {chat.loading ? (
+                                <span className="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400 font-bold">
+                                  <Loader2 size={12} className="animate-spin" /> 실시간 보도 검색 및 AI 분석 중...
+                                </span>
+                              ) : (
+                                chat.answer
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  {/* Chat input */}
+                  <form onSubmit={handleChatSubmit} className="flex gap-2">
+                    <input 
+                      type="text"
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      placeholder="추가 질문을 입력해 주세요..."
+                      disabled={loadingChat}
+                      className="flex-1 bg-zinc-50 dark:bg-[#15151a] border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-zinc-900 dark:text-zinc-100"
+                    />
+                    <button 
+                      type="submit"
+                      disabled={loadingChat || !chatInput.trim()}
+                      className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl p-2 shrink-0 disabled:opacity-40 flex items-center justify-center"
+                    >
+                      <Send size={14} />
+                    </button>
+                  </form>
+                </div>
+
+                {/* Emoji Reactions */}
+                <div className="space-y-3 pt-2 border-t border-zinc-100 dark:border-zinc-800/80">
+                  <h4 className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">
+                    리액션 남기기
+                  </h4>
+                  <div className="flex gap-2.5">
+                    {["👍", "👎", "😮", "😡"].map(emoji => {
+                      const reaction = reactions.find(r => r.emoji === emoji);
+                      const isReacted = !!userReactions[emoji];
+                      return (
+                        <button 
+                          key={emoji}
+                          onClick={() => handleAddReaction(emoji)}
+                          className={`flex items-center gap-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-850 border rounded-xl px-3.5 py-1.5 text-xs font-bold transition-all shadow-sm active:scale-95 ${
+                            isReacted 
+                              ? "bg-blue-50/50 dark:bg-blue-950/20 border-blue-500/50 dark:border-blue-500/40 text-blue-600 dark:text-blue-400" 
+                              : "bg-zinc-50 dark:bg-[#15151a] border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100"
+                          }`}
+                        >
+                          <span>{emoji}</span>
+                          <span className={`font-mono text-[10px] ${isReacted ? "text-blue-500" : "text-zinc-400"}`}>
+                            {reaction ? reaction.count : 0}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Community Comments */}
+                <div className="space-y-3 pt-2 border-t border-zinc-100 dark:border-zinc-800/80">
+                  <h4 className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest flex items-center gap-1.5">
+                    <MessageSquare size={14} className="text-zinc-400" /> 댓글 모음 ({comments.length}건)
+                  </h4>
+                  
+                  {/* Comments list */}
+                  <div className="space-y-2 max-h-[200px] overflow-y-auto pr-1">
+                    {comments.length === 0 ? (
+                      <p className="text-[11px] text-zinc-400 italic pl-1">첫 댓글을 작성해 보세요!</p>
+                    ) : (
+                      comments.map((comment, index) => (
+                        <div 
+                          key={index}
+                          className="bg-zinc-50 dark:bg-[#15151a] border border-zinc-200/60 dark:border-zinc-800 rounded-xl p-3 text-xs space-y-1"
+                        >
+                          <div className="flex justify-between items-center text-[10px] font-bold text-zinc-400">
+                            <span>👤 {comment.author}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-medium text-[9px]">{new Date(comment.created_at).toLocaleDateString()}</span>
+                              {(comment.user_token === userToken || !comment.user_token) && (
+                                <button 
+                                  onClick={() => handleDeleteComment(comment.id)}
+                                  className="text-zinc-400 hover:text-rose-500 p-0.5 rounded transition-colors"
+                                  title="댓글 삭제"
+                                >
+                                  <X size={12} />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <p className="text-zinc-700 dark:text-zinc-300 leading-normal pl-0.5">{comment.content}</p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  {/* Comment inputs */}
+                  <form onSubmit={handleAddComment} className="space-y-2">
+                    <div className="flex gap-2">
+                      <input 
+                        type="text"
+                        value={commentAuthor}
+                        onChange={(e) => setCommentAuthor(e.target.value)}
+                        placeholder="이름 (익명)"
+                        maxLength="15"
+                        className="w-1/3 bg-zinc-50 dark:bg-[#15151a] border border-zinc-200 dark:border-zinc-800 rounded-xl px-2.5 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-zinc-900 dark:text-zinc-100"
+                      />
+                      <input 
+                        type="text"
+                        value={commentContent}
+                        onChange={(e) => setCommentContent(e.target.value)}
+                        placeholder="공동 팩트체크를 위한 댓글을 적어주세요..."
+                        required
+                        className="flex-1 bg-zinc-50 dark:bg-[#15151a] border border-zinc-200 dark:border-zinc-800 rounded-xl px-2.5 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-zinc-900 dark:text-zinc-100"
+                      />
+                    </div>
+                    <button 
+                      type="submit"
+                      disabled={!commentContent.trim()}
+                      className="w-full bg-zinc-900 hover:bg-zinc-850 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 font-bold text-xs py-2 rounded-xl transition-all shadow-sm disabled:opacity-40"
+                    >
+                      댓글 등록
+                    </button>
+                  </form>
                 </div>
 
                 {/* Search references list */}

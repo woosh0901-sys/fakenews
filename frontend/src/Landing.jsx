@@ -5,19 +5,23 @@ import { Shield, TrendingUp, Moon, Sun, ArrowRight } from "lucide-react";
 const ROW_OPACITY = [1, 0.72, 0.55, 0.4, 0.28];
 const TICKER_INTERVAL_MS = 4000;
 
-export default function Landing({ darkMode, setDarkMode, history, onSubmit, onOpenDashboard }) {
+export default function Landing({ darkMode, setDarkMode, history, loading, onSubmit, onOpenDashboard }) {
   const [url, setUrl] = useState("");
   const [offset, setOffset] = useState(0);
   const [paused, setPaused] = useState(false);
 
   // URL별 검증 횟수 상위 5건 (동률이면 최신순)
   const topArticles = useMemo(() => {
+    if (!Array.isArray(history)) return [];
     const grouped = new Map();
     for (const item of history) {
+      if (!item || !item.url) continue;
       const entry = grouped.get(item.url);
       if (entry) {
         entry.count += 1;
-        if (new Date(item.created_at || 0) > new Date(entry.item.created_at || 0)) {
+        const currentCreatedAt = new Date(item.created_at || 0).getTime();
+        const entryCreatedAt = new Date(entry.item.created_at || 0).getTime();
+        if (currentCreatedAt > entryCreatedAt) {
           entry.item = item;
         }
       } else {
@@ -28,7 +32,7 @@ export default function Landing({ darkMode, setDarkMode, history, onSubmit, onOp
       .sort(
         (a, b) =>
           b.count - a.count ||
-          new Date(b.item.created_at || 0) - new Date(a.item.created_at || 0)
+          new Date(b.item.created_at || 0).getTime() - new Date(a.item.created_at || 0).getTime()
       )
       .slice(0, 5)
       .map((e) => ({ ...e.item, count: e.count }));
@@ -109,13 +113,15 @@ export default function Landing({ darkMode, setDarkMode, history, onSubmit, onOp
             onChange={(e) => setUrl(e.target.value)}
             placeholder="검증하려는 기사, 인스타그램·X(트위터) 게시물 링크를 입력해 주세요."
             required
-            className="w-full h-14 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-full pl-6 pr-30 text-sm shadow-md dark:shadow-[0_0_28px_rgba(255,255,255,0.10)] focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 dark:focus:ring-brand-400/30 dark:focus:border-brand-400 transition-all text-neutral-950 dark:text-neutral-100"
+            disabled={loading}
+            className="w-full h-14 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-full pl-6 pr-30 text-sm shadow-md dark:shadow-[0_0_28px_rgba(255,255,255,0.10)] focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 dark:focus:ring-brand-400/30 dark:focus:border-brand-400 transition-all text-neutral-950 dark:text-neutral-100 disabled:opacity-60 disabled:cursor-not-allowed"
           />
           <button
             type="submit"
-            className="absolute right-2 top-1/2 -translate-y-1/2 h-10 bg-brand-500 hover:bg-brand-600 active:bg-brand-700 text-white text-sm font-bold px-7 rounded-full transition-colors shadow-sm shadow-brand-500/10 dark:shadow-[0_0_16px_rgba(255,255,255,0.12)]"
+            disabled={loading}
+            className="absolute right-2 top-1/2 -translate-y-1/2 h-10 bg-brand-500 hover:bg-brand-600 active:bg-brand-700 text-white text-sm font-bold px-7 rounded-full transition-colors shadow-sm shadow-brand-500/10 dark:shadow-[0_0_16px_rgba(255,255,255,0.12)] disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            검증하기
+            {loading ? "검증 중..." : "검증하기"}
           </button>
         </form>
 
@@ -152,7 +158,7 @@ export default function Landing({ darkMode, setDarkMode, history, onSubmit, onOp
                       target="_blank"
                       rel="noreferrer"
                       title={item.title}
-                      className="flex items-center justify-center gap-2 min-w-0 w-full group"
+                      className="flex items-center justify-start gap-2 min-w-0 w-full group"
                     >
                       <span
                         className={`shrink-0 font-bold ${idx === 0

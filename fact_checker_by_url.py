@@ -36,12 +36,23 @@ def fetch_duckduckgo_search(query, max_results=3):
         "q": query
     }
     results = []
+    
+    # Filter list for low-credibility copy-paste sources and forums to prevent rumor dilution
+    EXCLUDED_DOMAINS = [
+        "instagram.com", "facebook.com", "twitter.com", "x.com", "tiktok.com", 
+        "youtube.com", "dcinside.com", "fmkorea.com", "ruliweb.com", "clien.net", 
+        "ppomppu.co.kr", "instiz.net", "inven.co.kr", "todayhumor.co.kr", 
+        "mlbpark.donga.com", "slrclub.com"
+    ]
+    
     try:
         resp = requests.post(url, headers=headers, data=data, timeout=10)
         if resp.status_code == 200:
             soup = BeautifulSoup(resp.text, 'html.parser')
             # DuckDuckGo HTML 검색 결과 파싱
-            for item in soup.find_all('div', class_='result__body')[:max_results]:
+            for item in soup.find_all('div', class_='result__body')[:max_results + 10]: # Fetch extra to allow filtering
+                if len(results) >= max_results:
+                    break
                 title_elem = item.find('a', class_='result__url')
                 snippet_elem = item.find('a', class_='result__snippet')
                 if title_elem and snippet_elem:
@@ -55,6 +66,16 @@ def fetch_duckduckgo_search(query, max_results=3):
                             link = urllib.parse.unquote(link.split("uddg=")[1].split("&")[0])
                         except:
                             pass
+                            
+                    # Exclude low-credibility rumor mills and SNS
+                    is_excluded = False
+                    for domain in EXCLUDED_DOMAINS:
+                        if domain in link:
+                            is_excluded = True
+                            break
+                    if is_excluded:
+                        continue
+                        
                     results.append({
                         "title": title,
                         "link": link,
@@ -64,6 +85,23 @@ def fetch_duckduckgo_search(query, max_results=3):
     except Exception as e:
         print(f"[-] DuckDuckGo 웹 검색 중 에러 발생: {e}")
     return results
+
+def translate_ko_to_en(text):
+    """
+    구글 번역 무료 웹 API를 이용해 한글 쿼리를 영어로 번역합니다.
+    """
+    import urllib.parse
+    try:
+        encoded_text = urllib.parse.quote(text)
+        url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=ko&tl=en&dt=t&q={encoded_text}"
+        resp = requests.get(url, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            translated = data[0][0][0]
+            return translated
+    except Exception as e:
+        print(f"    [-] 검색 쿼리 영문 번역 실패 (로컬 검색어 유지): {e}")
+    return text
 
 def fetch_hybrid_news(query, display_count=3):
     """
@@ -75,19 +113,47 @@ def fetch_hybrid_news(query, display_count=3):
     print(f"    - 네이버 뉴스 검색 결과: {len(naver_sources)}개 수집됨.")
     
     # 2. DuckDuckGo 실시간 웹 검색 실행
-    web_sources = fetch_duckduckgo_search(query, max_results=display_count)
-    print(f"    - DuckDuckGo 웹 검색 결과: {len(web_sources)}개 수집됨.")
+    # 만약 쿼리에 한국어가 포함되어 있다면, 영어 번역 검색도 병행하여 해외 원본 기사를 수집합니다.
+    has_korean = bool(re.search(r'[가-힣]', query))
+    web_sources = []
     
-    # 3. 중복 제거하며 병합 (네이버 결과 우선순위)
+    if has_korean:
+        # 한국어 검색 실행
+        web_sources_ko = fetch_duckduckgo_search(query, max_results=display_count)
+        web_sources.extend(web_sources_ko)
+        
+        # 영어 번역 검색 실행 (해외 기사 검증용)
+        eng_query = translate_ko_to_en(query)
+        if eng_query and eng_query != query:
+            print(f"    - 해외 기사 교차 대조를 위해 영어 번역 쿼리 실행: '{eng_query}'")
+            web_sources_en = fetch_duckduckgo_search(eng_query, max_results=display_count)
+            web_sources.extend(web_sources_en)
+    else:
+        # 영어 쿼리인 경우 바로 실행
+        web_sources_en = fetch_duckduckgo_search(query, max_results=display_count)
+        web_sources.extend(web_sources_en)
+        
+    # 3. 중복 제거하며 병합 (네이버 결과 우선순위, 해외 원본 기사 우선순위 부여)
     merged = []
     existing_links = set()
     
+    # (1) 네이버 뉴스 우선 추가
     for s in naver_sources:
         if s['link'] not in existing_links:
             merged.append(s)
             existing_links.add(s['link'])
             
-    for s in web_sources:
+    # (2) 영어/해외 소스 추가 (제목에 한글이 없는 것을 탐지하여 우선순위 부여)
+    english_sources = [s for s in web_sources if not re.search(r'[가-힣]', s['title'])]
+    korean_web_sources = [s for s in web_sources if re.search(r'[가-힣]', s['title'])]
+    
+    for s in english_sources:
+        if s['link'] not in existing_links:
+            merged.append(s)
+            existing_links.add(s['link'])
+            
+    # (3) 나머지 한국어 웹 소스 추가
+    for s in korean_web_sources:
         if s['link'] not in existing_links:
             merged.append(s)
             existing_links.add(s['link'])
@@ -154,6 +220,41 @@ def scrape_url_content(url):
         # 제목 가짜 문자열 정제
         title = re.sub(r'\s+', ' ', title).strip()
         
+        # 3. 만약 본문이 너무 짧고 커뮤니티 글처럼 외부 뉴스 링크를 포함하고 있는 경우
+        # 본문에서 외부 기사 링크를 찾아 원본 뉴스 기사를 추가로 크롤링하여 본문에 병합합니다.
+        if text and len(text) < 400:
+            print("    [!] 본문이 너무 짧습니다. 외부 뉴스 링크가 포함되어 있는지 탐색합니다...")
+            news_link = None
+            # 기사 도메인 패턴
+            news_patterns = [
+                r'news\.naver\.com', r'v\.daum\.net', r'news\.v\.daum\.net',
+                r'chosun\.com', r'donga\.com', r'joongang\.co\.kr', r'hani\.co\.kr',
+                r'khan\.co\.kr', r'yna\.co\.kr', r'hankyung\.com', r'mk\.co\.kr',
+                r'sedaily\.com', r'mt\.co\.kr', r'moneytoday', r'seoul\.co\.kr',
+                r'segye\.com', r'kmib\.co\.kr', r'munhwa\.com', r'kukinews',
+                r'nocutnews', r'ytn\.co\.kr', r'sbs\.co\.kr', r'kbs\.co\.kr',
+                r'imbc\.com', r'newsis\.com', r'news1\.kr', r'heraldcorp\.com',
+                r'asiae\.co\.kr', r'etnews\.com', r'digitaltimes'
+            ]
+            
+            # <a> 태그에서 기사 도메인 검색
+            for a in soup.find_all('a', href=True):
+                href = a['href']
+                for pat in news_patterns:
+                    if re.search(pat, href):
+                        news_link = href
+                        break
+                if news_link:
+                    break
+                    
+            if news_link:
+                print(f"    [+] 커뮤니티 게시물 내 뉴스 원본 링크 감지: {news_link}")
+                print("    - 원본 뉴스 링크를 추가로 크롤링하여 본문에 결합합니다.")
+                original_article = scrape_url_content(news_link)
+                if original_article and original_article['content']:
+                    title = f"[연동] {original_article['title']} (출처: {title})"
+                    text = f"{text} \n\n[연동 뉴스 원본 본문]\n{original_article['content']}"
+                    
         return {
             'url': url,
             'title': title,
@@ -298,6 +399,9 @@ def strip_josa(word):
     """
     한글 단어 뒤에 붙는 대표적인 조사들을 지워 명사 원형만 남깁니다.
     """
+    protected_words = {"국가", "회의", "결과", "효과", "통과", "온도", "태도", "속도", "지도", "제도", "도로", "서로", "나이", "아이", "오이", "차이", "주의", "정의", "합의", "평화", "대화", "변화", "문화", "영화", "전화"}
+    if word in protected_words:
+        return word
     josa_suffixes = ["에서", "한테", "부터", "까지", "으로", "처럼", "하고", "이며", "은", "는", "이", "가", "을", "를", "의", "에", "와", "과", "도", "만", "랑", "며", "로"]
     for suffix in josa_suffixes:
         if word.endswith(suffix) and len(word) > len(suffix):
@@ -346,7 +450,11 @@ def fact_check_article_with_sources(target_title, target_content, sources, conte
     for i, s in enumerate(sources):
         sources_text += f"[참고 뉴스 {i+1}]\n제목: {s['title']}\n요약: {s['description']}\n출처 링크: {s['link']}\n\n"
 
+    from datetime import datetime
+    current_date = datetime.now().strftime("%Y년 %m월 %d일")
+
     prompt = (
+        f"현재 날짜: {current_date}\n"
         "당신은 가짜 뉴스와 조작된 허위 기사를 가려내는 전문 팩트체커 AI입니다.\n"
         f"아래 제공된 [검증 대상 {content_label}]의 사실 관계와, 포털 뉴스 API를 통해 실시간 검색된 공식 [참고 뉴스 기사 목록]을 상호 비교하십시오.\n\n"
         f"[검증 대상 {content_label}]\n"
@@ -371,7 +479,7 @@ def fact_check_article_with_sources(target_title, target_content, sources, conte
     
     # 클라우드 Gemini API 연동 설정이 있는 경우 우선 사용 (초고속 판정)
     if GEMINI_API_KEY and GEMINI_API_KEY.strip() and GEMINI_API_KEY.strip() != "YOUR_GEMINI_API_KEY":
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY.strip()}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY.strip()}"
         headers = {
             "Content-Type": "application/json"
         }
@@ -504,6 +612,60 @@ def get_trained_nll_model():
         print(f"[-] NLL 모델 학습 중 에러 발생 (기본 임계값 5.6 사용): {e}")
         return None, 5.6
 
+def load_nll_model():
+    """
+    Tries to load a pre-trained NLL model from the JSON cache file.
+    If the cache does not exist, it trains the model and saves it.
+    """
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    trained_model_path = os.path.join(base_dir, "data", "nll_model_trained.json")
+    
+    if os.path.exists(trained_model_path):
+        print("\n[*] 1단계 NLL 통계 필터 로딩 중 (캐시된 모델 사용)...")
+        try:
+            import time
+            from collections import Counter
+            t0 = time.time()
+            with open(trained_model_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                
+            lm = TrigramLanguageModel()
+            lm.total_words = data["total_words"]
+            lm.vocab = set(data["vocab"])
+            threshold = data["threshold"]
+            
+            lm.unigrams = Counter(data["unigrams"])
+            lm.bigrams = Counter({(k.split("\t")[0], k.split("\t")[1]): v for k, v in data["bigrams"].items()})
+            lm.trigrams = Counter({(k.split("\t")[0], k.split("\t")[1], k.split("\t")[2]): v for k, v in data["trigrams"].items()})
+            
+            print(f"    - 캐시된 NLL 모델 로드 완료 ({time.time() - t0:.3f}초 소요, 임계값: {threshold:.4f})")
+            return lm, threshold
+        except Exception as e:
+            print(f"[-] 캐시된 NLL 모델 로드 중 에러 발생, 재학습을 시도합니다: {e}")
+            
+    # Fallback to training
+    lm, threshold = get_trained_nll_model()
+    
+    # Save cache
+    try:
+        print("[*] NLL 모델 캐시 저장 중...")
+        serialized = {
+            "total_words": lm.total_words,
+            "vocab": list(lm.vocab),
+            "threshold": threshold,
+            "unigrams": dict(lm.unigrams),
+            "bigrams": {f"{k[0]}\t{k[1]}": v for k, v in lm.bigrams.items()},
+            "trigrams": {f"{k[0]}\t{k[1]}\t{k[2]}": v for k, v in lm.trigrams.items()}
+        }
+        with open(trained_model_path, "w", encoding="utf-8") as f:
+            json.dump(serialized, f, ensure_ascii=False)
+        print(f"[+] NLL 모델 캐시 저장 완료: {trained_model_path}")
+    except Exception as e:
+        print(f"[-] NLL 모델 캐시 저장 실패: {e}")
+        
+    return lm, threshold
+
+
 def check_url_validity(url, nll_model=None, nll_threshold=5.6):
     """
     주어진 URL을 크롤링하여 팩트 체크를 전체 수행하는 핵심 파이프라인 함수
@@ -571,7 +733,7 @@ def check_url_validity(url, nll_model=None, nll_threshold=5.6):
     
     print("\n[3] 실시간 포털 및 웹 검색 교차 검증 정보 수집 중...")
     # 실시간 처리 속도를 올리기 위해 기사 수를 3개로 제한 (네이버 뉴스 + DuckDuckGo 하이브리드)
-    sources = fetch_hybrid_news(search_query, display_count=3)
+    sources = fetch_hybrid_news(search_query, display_count=5)
     print(f"    - 수집된 신뢰 기사 개수: {len(sources)}개")
     for i, s in enumerate(sources):
         print(f"      ({i+1}) {s['title']} | {s['pubDate']}")
@@ -596,8 +758,8 @@ if __name__ == "__main__":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
     
-    # 1단계 NLL 모델 로딩 및 학습
-    nll_model, nll_threshold = get_trained_nll_model()
+    # 1단계 NLL 모델 로딩 및 학습 (캐시 지원)
+    nll_model, nll_threshold = load_nll_model()
     
     # 2. 테스트 구동
     if len(sys.argv) < 2:
