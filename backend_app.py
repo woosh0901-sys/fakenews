@@ -354,7 +354,7 @@ async def query_check(check_id: int, payload: QueryRequest):
         answer = "LLM 연동이 되어 있지 않아 추가 질문에 대한 분석을 진행할 수 없습니다."
         
         if GEMINI_API_KEY and GEMINI_API_KEY.strip() and GEMINI_API_KEY.strip() != "YOUR_GEMINI_API_KEY":
-            g_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY.strip()}"
+            g_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY.strip()}"
             g_headers = {"Content-Type": "application/json"}
             g_payload = {
                 "contents": [{"parts": [{"text": prompt}]}]
