@@ -14,7 +14,12 @@ def custom_tokenize(text):
     josa_pattern = re.compile(
         r'(은|는|이|가|을|를|의|에|에서|로|으로|와|과|도|만|고|며|라고|하고|했다|한다|입니다|이다|였다|이며|에도|에서만|보다|까지|처럼|조차|마저|요|으로의|로서|로써|한테|에게|께)$'
     )
+    # Protect common Korean nouns from being corrupted by naive Josa stripping
+    protected_words = {"국가", "회의", "결과", "효과", "통과", "온도", "태도", "속도", "지도", "제도", "도로", "서로", "나이", "아이", "오이", "차이", "주의", "정의", "합의", "평화", "대화", "변화", "문화", "영화", "전화"}
     for word in words:
+        if word in protected_words:
+            tokens.append(word)
+            continue
         if re.match(r'^[가-힣]+$', word):
             stemmed = josa_pattern.sub('', word)
             stemmed = josa_pattern.sub('', stemmed) # double strip
@@ -40,9 +45,9 @@ class TrigramLanguageModel:
         for tokens in corpus_tokens:
             # Pad with start and end tokens
             padded = ['<s>', '<s>'] + tokens + ['</s>']
-            self.total_words += len(tokens)
+            self.total_words += len(padded)
             
-            for word in tokens:
+            for word in padded:
                 self.unigrams[word] += 1
                 self.vocab.add(word)
                 
@@ -60,7 +65,7 @@ class TrigramLanguageModel:
         tri_count = self.trigrams[(w1, w2, w3)]
         bi_count = self.bigrams[(w1, w2)]
         
-        if bi_count > 0 and tri_count > 0:
+        if bi_count > 0:
             return 0.7 * (tri_count / bi_count) + 0.3 * self.get_bigram_prob(w2, w3)
         else:
             return self.get_bigram_prob(w2, w3)

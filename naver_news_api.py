@@ -66,9 +66,9 @@ def fetch_naver_news(client_id, client_secret, query, display_count=5):
 
 # 테스트 코드 (실행 확인용)
 if __name__ == "__main__":
-    # 발급받으신 키를 여기에 임시로 채워 테스트할 수 있습니다.
-    NAVER_CLIENT_ID = "nB9lDmS8JDNRd_xmZm1w"
-    NAVER_CLIENT_SECRET = "uno66uxJYq"
+    # Use environment variables instead of hardcoding credentials for security
+    NAVER_CLIENT_ID = os.environ.get("NAVER_CLIENT_ID", "YOUR_CLIENT_ID")
+    NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET", "YOUR_CLIENT_SECRET")
     
     if NAVER_CLIENT_ID == "YOUR_CLIENT_ID":
         print("💡 나중에 naver_news_api.py 파일 내부의 NAVER_CLIENT_ID와 SECRET을 실제 발급받으신 키로 변경하여 테스트해 보세요.")

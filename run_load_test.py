@@ -18,7 +18,7 @@ from reconstruction_detector import custom_tokenize
 WORKSPACE_DIR = os.path.dirname(os.path.abspath(__file__))
 REAL_NEWS_PATH = os.path.join(WORKSPACE_DIR, "data", "real_news.json")
 FAKE_NEWS_PATH = os.path.join(WORKSPACE_DIR, "data", "fake_news.json")
-REPORT_PATH = r"C:\Users\woosh\.gemini\antigravity-cli\brain\146d4184-0360-4030-9e1d-212260a6ddec\load_test_report.md"
+REPORT_PATH = os.path.join(WORKSPACE_DIR, "load_test_report.md")
 
 def load_news_dataset():
     with open(REAL_NEWS_PATH, "r", encoding="utf-8") as f:

@@ -242,6 +242,9 @@ def strip_josa(word):
     """
     한글 단어 뒤에 붙는 대표적인 조사들을 지워 명사 원형만 남깁니다.
     """
+    protected_words = {"국가", "회의", "결과", "효과", "통과", "온도", "태도", "속도", "지도", "제도", "도로", "서로", "나이", "아이", "오이", "차이", "주의", "정의", "합의", "평화", "대화", "변화", "문화", "영화", "전화"}
+    if word in protected_words:
+        return word
     josa_suffixes = ["에서", "한테", "부터", "까지", "으로", "처럼", "하고", "이며", "은", "는", "이", "가", "을", "를", "의", "에", "와", "과", "도", "만", "랑", "며", "로"]
     for suffix in josa_suffixes:
         if word.endswith(suffix) and len(word) > len(suffix):
