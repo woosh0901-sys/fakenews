@@ -238,6 +238,62 @@ def scrape_instagram_post(url):
         print(f"[-] 인스타그램 게시물 크롤링 중 에러 발생: {e}")
         return None
 
+# 트위터(X) 게시물 URL 패턴 (twitter.com / x.com / mobile.twitter.com)
+TWITTER_URL_RE = re.compile(r'\b(?:twitter|x)\.com/([A-Za-z0-9_]+)/status(?:es)?/(\d+)')
+
+def is_twitter_url(url):
+    return bool(TWITTER_URL_RE.search(url))
+
+def scrape_twitter_post(url):
+    """
+    트위터(X) 공개 게시물의 본문을 추출합니다.
+    x.com은 로그인 없이는 페이지 크롤링이 막혀 있지만, 공개 oEmbed API
+    (publish.twitter.com/oembed)는 API 키 없이 트윗 본문 HTML을 반환합니다.
+    """
+    m = TWITTER_URL_RE.search(url)
+    if not m:
+        return None
+    username, tweet_id = m.group(1), m.group(2)
+    canonical_url = f"https://twitter.com/{username}/status/{tweet_id}"
+
+    try:
+        resp = requests.get(
+            "https://publish.twitter.com/oembed",
+            params={"url": canonical_url, "omit_script": "true", "lang": "ko"},
+            timeout=15
+        )
+        if resp.status_code != 200:
+            print(f"[-] 트위터 oEmbed 조회 실패 (HTTP {resp.status_code}). 삭제되었거나 비공개 계정의 게시물일 수 있습니다.")
+            return None
+
+        data = resp.json()
+        html = data.get("html", "")
+        soup = BeautifulSoup(html, "html.parser")
+        p = soup.find("p")
+        text = p.get_text(" ", strip=True) if p else soup.get_text(" ", strip=True)
+
+        # 첨부 이미지/단축 링크 텍스트(pic.twitter.com, t.co)는 본문이 아니므로 제거
+        text = re.sub(r'(?:pic\.twitter\.com|https?://t\.co)/\S+', '', text)
+        text = re.sub(r'\s+', ' ', text).strip()
+
+        if not text:
+            print("[-] 트윗 본문을 추출하지 못했습니다. 이미지/영상만 있는 게시물일 수 있습니다.")
+            return None
+
+        author = data.get("author_name") or username
+        first_line = text.split(". ")[0][:60].strip()
+
+        print(f"    - X(트위터) 게시물 감지 (작성자: {author} @{username})")
+        return {
+            'url': canonical_url,
+            'title': f"[X(트위터)] {author}: {first_line}",
+            'content': text,
+            'search_text': first_line  # 검색어 추출은 대괄호 접두어 없이 본문만 사용
+        }
+    except Exception as e:
+        print(f"[-] 트위터 게시물 조회 중 에러 발생: {e}")
+        return None
+
 def strip_josa(word):
     """
     한글 단어 뒤에 붙는 대표적인 조사들을 지워 명사 원형만 남깁니다.
@@ -513,8 +569,16 @@ def check_url_validity(url, nll_model=None, nll_threshold=5.6):
     """
     print(f"\n[1] 입력받은 URL 크롤링 중...")
     print(f"    Target: {url}")
-    is_instagram = is_instagram_url(url)
-    article = scrape_instagram_post(url) if is_instagram else scrape_url_content(url)
+    # SNS 게시물(인스타그램/트위터)은 전용 스크레이퍼 사용
+    sns_label = None
+    if is_instagram_url(url):
+        sns_label = "인스타그램 게시물"
+        article = scrape_instagram_post(url)
+    elif is_twitter_url(url):
+        sns_label = "X(트위터) 게시물"
+        article = scrape_twitter_post(url)
+    else:
+        article = scrape_url_content(url)
 
     if not article or not article['content']:
         print("[-] 본문 텍스트를 추출할 수 없거나 웹페이지 접근에 실패했습니다.")
@@ -524,9 +588,9 @@ def check_url_validity(url, nll_model=None, nll_threshold=5.6):
     print(f"    - 본문 길이: {len(article['content'])} 자 추출 완료.")
 
     # === 1단계: NLL 통계 필터 검사 ===
-    # 인스타그램 캡션은 뉴스 문체 코퍼스로 학습된 NLL 필터에 부적합하므로 건너뛰고 바로 2단계 검증
+    # SNS 본문은 뉴스 문체 코퍼스로 학습된 NLL 필터에 부적합하므로 건너뛰고 바로 2단계 검증
     nll_loss = None
-    if is_instagram:
+    if sns_label:
         print("\n[1-5] SNS 게시물은 1단계 NLL 필터를 건너뛰고 2단계 정밀 팩트체크로 바로 진행합니다.")
     elif nll_model:
         print("\n[1-5] 1단계 NLL 통계 필터 분석 중...")
@@ -554,7 +618,7 @@ def check_url_validity(url, nll_model=None, nll_threshold=5.6):
         
     # === 2단계: RAG-LLM 팩트체크 ===
     print("\n[2] 로컬 텍스트 분석 기반 핵심 검색 키워드 추출 중...")
-    # 인스타그램은 '[인스타그램] 유저명:' 접두어를 제외한 캡션 본문에서 키워드 추출
+    # SNS는 '[플랫폼] 유저명:' 접두어를 제외한 본문에서 키워드 추출
     search_base = article.get('search_text') or article['title']
     keywords = extract_keywords_fast(search_base)
     if not keywords:
@@ -571,7 +635,7 @@ def check_url_validity(url, nll_model=None, nll_threshold=5.6):
         print(f"      ({i+1}) {s['title']} | {s['pubDate']}")
         
     print("\n[4] RAG-LLM 기반 상호 팩트체크 대조 분석 중...")
-    content_label = "인스타그램 게시물" if is_instagram else "기사"
+    content_label = sns_label or "기사"
     result = fact_check_article_with_sources(article['title'], article['content'], sources, content_label=content_label)
     
     # 입력 정보 병합
