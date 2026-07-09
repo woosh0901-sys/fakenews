@@ -60,6 +60,17 @@ export default function App() {
   const [commentContent, setCommentContent] = useState("");
   const [chatInput, setChatInput] = useState("");
   const [loadingChat, setLoadingChat] = useState(false);
+  
+  // Persistent anonymous user identity
+  const [userToken, setUserToken] = useState(() => {
+    let token = localStorage.getItem("user_token");
+    if (!token) {
+      token = "user_" + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      localStorage.setItem("user_token", token);
+    }
+    return token;
+  });
+  const [userReactions, setUserReactions] = useState({});
 
   // Apply theme class
   useEffect(() => {
@@ -107,6 +118,7 @@ export default function App() {
       setComments([]);
       setReactions([]);
       setChatHistory([]);
+      setUserReactions({});
       return;
     }
     
@@ -119,6 +131,10 @@ export default function App() {
         setComments(commentsRes.data);
         setReactions(reactionsRes.data);
         setChatHistory([]);
+        
+        // Load user's local reactions for this item
+        const savedReactions = JSON.parse(localStorage.getItem(`reacted_${selectedItem.id}`) || "{}");
+        setUserReactions(savedReactions);
       } catch (err) {
         console.error("댓글/리액션 로드 실패:", err);
       }
@@ -195,13 +211,28 @@ export default function App() {
     try {
       const res = await axios.post(`${API_BASE_URL}/history/${selectedItem.id}/comments`, {
         author,
-        content: commentContent
+        content: commentContent,
+        user_token: userToken
       });
       setComments([...comments, res.data]);
       setCommentContent("");
     } catch (err) {
       const errMsg = err.response?.data?.detail || err.message || "알 수 없는 에러";
       alert("댓글 저장 실패: " + errMsg);
+    }
+  };
+
+  const handleDeleteComment = async (commentId) => {
+    if (!selectedItem) return;
+    if (!confirm("정말 이 댓글을 삭제하시겠습니까?")) return;
+    try {
+      await axios.delete(`${API_BASE_URL}/history/${selectedItem.id}/comments/${commentId}`, {
+        params: { user_token: userToken }
+      });
+      setComments(comments.filter(c => c.id !== commentId));
+    } catch (err) {
+      const errMsg = err.response?.data?.detail || err.message || "삭제 실패";
+      alert("댓글 삭제 실패: " + errMsg);
     }
   };
 
@@ -213,10 +244,23 @@ export default function App() {
       return;
     }
     
+    const isAlreadyReacted = !!userReactions[emoji];
+    
     try {
       const res = await axios.post(`${API_BASE_URL}/history/${selectedItem.id}/reactions`, {
-        emoji
+        emoji,
+        is_canceling: isAlreadyReacted
       });
+      
+      const updatedUserReactions = { ...userReactions };
+      if (isAlreadyReacted) {
+        delete updatedUserReactions[emoji];
+      } else {
+        updatedUserReactions[emoji] = true;
+      }
+      setUserReactions(updatedUserReactions);
+      localStorage.setItem(`reacted_${selectedItem.id}`, JSON.stringify(updatedUserReactions));
+      
       const updatedReactions = [...reactions];
       const idx = updatedReactions.findIndex(r => r.emoji === emoji);
       if (idx > -1) {
@@ -857,14 +901,21 @@ export default function App() {
                   <div className="flex gap-2.5">
                     {["👍", "👎", "😮", "😡"].map(emoji => {
                       const reaction = reactions.find(r => r.emoji === emoji);
+                      const isReacted = !!userReactions[emoji];
                       return (
                         <button 
                           key={emoji}
                           onClick={() => handleAddReaction(emoji)}
-                          className="flex items-center gap-1.5 bg-zinc-50 dark:bg-[#15151a] hover:bg-zinc-100 dark:hover:bg-zinc-850 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-1.5 text-xs font-bold transition-all shadow-sm active:scale-95"
+                          className={`flex items-center gap-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-850 border rounded-xl px-3.5 py-1.5 text-xs font-bold transition-all shadow-sm active:scale-95 ${
+                            isReacted 
+                              ? "bg-blue-50/50 dark:bg-blue-950/20 border-blue-500/50 dark:border-blue-500/40 text-blue-600 dark:text-blue-400" 
+                              : "bg-zinc-50 dark:bg-[#15151a] border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100"
+                          }`}
                         >
                           <span>{emoji}</span>
-                          <span className="font-mono text-[10px] text-zinc-400">{reaction ? reaction.count : 0}</span>
+                          <span className={`font-mono text-[10px] ${isReacted ? "text-blue-500" : "text-zinc-400"}`}>
+                            {reaction ? reaction.count : 0}
+                          </span>
                         </button>
                       );
                     })}
@@ -889,7 +940,18 @@ export default function App() {
                         >
                           <div className="flex justify-between items-center text-[10px] font-bold text-zinc-400">
                             <span>👤 {comment.author}</span>
-                            <span className="font-mono font-medium text-[9px]">{new Date(comment.created_at).toLocaleDateString()}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-medium text-[9px]">{new Date(comment.created_at).toLocaleDateString()}</span>
+                              {(comment.user_token === userToken || !comment.user_token) && (
+                                <button 
+                                  onClick={() => handleDeleteComment(comment.id)}
+                                  className="text-zinc-400 hover:text-rose-500 p-0.5 rounded transition-colors"
+                                  title="댓글 삭제"
+                                >
+                                  <X size={12} />
+                                </button>
+                              )}
+                            </div>
                           </div>
                           <p className="text-zinc-700 dark:text-zinc-300 leading-normal pl-0.5">{comment.content}</p>
                         </div>

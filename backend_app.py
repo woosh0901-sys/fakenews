@@ -235,9 +235,11 @@ class QueryRequest(BaseModel):
 class CommentRequest(BaseModel):
     author: str
     content: str
+    user_token: Optional[str] = None
 
 class ReactionRequest(BaseModel):
     emoji: str
+    is_canceling: Optional[bool] = False
 
 @app.get("/api/stats/rankings")
 async def get_rankings():
@@ -394,6 +396,7 @@ async def get_comments(check_id: int):
 async def add_comment(check_id: int, payload: CommentRequest):
     author = payload.author.strip() or "익명"
     content = payload.content.strip()
+    user_token = payload.user_token
     if not content:
         raise HTTPException(status_code=400, detail="댓글 내용을 입력해 주세요.")
         
@@ -405,7 +408,8 @@ async def add_comment(check_id: int, payload: CommentRequest):
         comment_data = {
             "check_id": check_id,
             "author": author,
-            "content": content
+            "content": content,
+            "user_token": user_token
         }
         resp = requests.post(f"{SUPABASE_URL}/rest/v1/check_comments", headers=headers, json=comment_data)
         if resp.status_code != 201:
@@ -413,6 +417,39 @@ async def add_comment(check_id: int, payload: CommentRequest):
         return resp.json()[0]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"댓글 저장 실패: {str(e)}")
+
+@app.delete("/api/history/{check_id}/comments/{comment_id}")
+async def delete_comment(check_id: int, comment_id: int, user_token: str):
+    if not SUPABASE_ENABLED:
+        raise HTTPException(status_code=503, detail="Supabase 설정이 필요합니다.")
+        
+    try:
+        headers = get_supabase_headers()
+        
+        # 1. Fetch the comment to verify ownership
+        url = f"{SUPABASE_URL}/rest/v1/check_comments?id=eq.{comment_id}"
+        resp_get = requests.get(url, headers=headers)
+        if resp_get.status_code != 200 or not resp_get.json():
+            raise HTTPException(status_code=404, detail="댓글을 찾을 수 없거나 이미 삭제되었습니다.")
+            
+        comment = resp_get.json()[0]
+        db_token = comment.get("user_token")
+        
+        # Allow deletion if tokens match, or if db_token is empty (fallback for legacy comments)
+        if db_token and db_token != user_token:
+            raise HTTPException(status_code=403, detail="본인이 작성한 댓글만 삭제할 수 있습니다.")
+            
+        # 2. Delete from database
+        del_url = f"{SUPABASE_URL}/rest/v1/check_comments?id=eq.{comment_id}"
+        resp_del = requests.delete(del_url, headers=headers)
+        if resp_del.status_code not in (200, 204):
+            raise Exception(f"Supabase 댓글 삭제 실패 (HTTP {resp_del.status_code}): {resp_del.text}")
+            
+        return {"status": "success", "message": "댓글이 삭제되었습니다."}
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"댓글 삭제 실패: {str(e)}")
 
 @app.get("/api/history/{check_id}/reactions")
 async def get_reactions(check_id: int):
@@ -431,6 +468,7 @@ async def get_reactions(check_id: int):
 @app.post("/api/history/{check_id}/reactions")
 async def add_reaction(check_id: int, payload: ReactionRequest):
     emoji = payload.emoji.strip()
+    is_canceling = payload.is_canceling
     if not emoji:
         raise HTTPException(status_code=400, detail="이모지가 없습니다.")
         
@@ -445,17 +483,40 @@ async def add_reaction(check_id: int, payload: ReactionRequest):
         resp_get = requests.get(url, headers=headers)
         
         if resp_get.status_code == 200 and resp_get.json():
-            # Exist -> update count + 1
             existing = resp_get.json()[0]
-            new_count = int(existing['count']) + 1
-            update_url = f"{SUPABASE_URL}/rest/v1/check_reactions?id=eq.{existing['id']}"
-            resp_up = requests.patch(update_url, headers=headers, json={"count": new_count})
-            if resp_up.status_code not in (200, 204):
-                raise Exception(f"Supabase 리액션 수정 실패 (HTTP {resp_up.status_code}): {resp_up.text}")
-            
-            existing['count'] = new_count
-            return existing
+            if is_canceling:
+                # Decrement count
+                new_count = int(existing['count']) - 1
+                if new_count <= 0:
+                    # Delete the reaction row if count falls to 0
+                    del_url = f"{SUPABASE_URL}/rest/v1/check_reactions?id=eq.{existing['id']}"
+                    resp_del = requests.delete(del_url, headers=headers)
+                    if resp_del.status_code not in (200, 204):
+                        raise Exception(f"Supabase 리액션 삭제 실패 (HTTP {resp_del.status_code}): {resp_del.text}")
+                    existing['count'] = 0
+                    return existing
+                else:
+                    # Update count
+                    update_url = f"{SUPABASE_URL}/rest/v1/check_reactions?id=eq.{existing['id']}"
+                    resp_up = requests.patch(update_url, headers=headers, json={"count": new_count})
+                    if resp_up.status_code not in (200, 204):
+                        raise Exception(f"Supabase 리액션 수정 실패 (HTTP {resp_up.status_code}): {resp_up.text}")
+                    existing['count'] = new_count
+                    return existing
+            else:
+                # Increment count
+                new_count = int(existing['count']) + 1
+                update_url = f"{SUPABASE_URL}/rest/v1/check_reactions?id=eq.{existing['id']}"
+                resp_up = requests.patch(update_url, headers=headers, json={"count": new_count})
+                if resp_up.status_code not in (200, 204):
+                    raise Exception(f"Supabase 리액션 수정 실패 (HTTP {resp_up.status_code}): {resp_up.text}")
+                
+                existing['count'] = new_count
+                return existing
         else:
+            if is_canceling:
+                return {"check_id": check_id, "emoji": emoji, "count": 0}
+                
             # Not exist -> insert
             reaction_data = {
                 "check_id": check_id,
