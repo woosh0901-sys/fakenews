@@ -321,7 +321,7 @@ async def query_check(check_id: int, payload: QueryRequest):
         # 2. Run real-time hybrid search for the query
         from fact_checker_by_url import fetch_hybrid_news
         print(f"[*] 추가 분석 실시간 웹 검색 실행 중: {user_query}")
-        sources = fetch_hybrid_news(user_query, display_count=3)
+        sources = fetch_hybrid_news(user_query, display_count=5)
         
         sources_text = ""
         for i, s in enumerate(sources):
