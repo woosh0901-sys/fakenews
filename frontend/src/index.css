@@ -5,10 +5,14 @@
 
 /* DesignSystem.json 디자인 토큰 */
 @theme {
-  /* primitive.font.family.sans */
-  --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont,
-    system-ui, "Apple SD Gothic Neo", "Malgun Gothic", "맑은 고딕", Roboto,
-    "Helvetica Neue", "Segoe UI", sans-serif;
+  /* 폰트 통일: 영문·숫자 = Helvetica, 한글 = SUIT
+     (Helvetica에는 한글 글리프가 없어 한글이 자동으로 SUIT로 폴백됨) */
+  --font-sans: "Helvetica Neue", Helvetica, Arial, "SUIT Variable", SUIT,
+    -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo",
+    "Malgun Gothic", "맑은 고딕", sans-serif;
+  --font-mono: "Helvetica Neue", Helvetica, Arial, "SUIT Variable", SUIT,
+    -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo",
+    "Malgun Gothic", "맑은 고딕", sans-serif;
 
   /* primitive.color.brand */
   --color-brand-50: #F0F4FA;
@@ -102,6 +106,18 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* 랜딩 Top5 티커 전환 애니메이션 */
+@keyframes ticker-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Custom scrollbars for details panel and layout */
