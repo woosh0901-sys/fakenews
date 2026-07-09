@@ -479,7 +479,7 @@ def fact_check_article_with_sources(target_title, target_content, sources, conte
     
     # 클라우드 Gemini API 연동 설정이 있는 경우 우선 사용 (초고속 판정)
     if GEMINI_API_KEY and GEMINI_API_KEY.strip() and GEMINI_API_KEY.strip() != "YOUR_GEMINI_API_KEY":
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY.strip()}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY.strip()}"
         headers = {
             "Content-Type": "application/json"
         }
