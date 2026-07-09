@@ -186,6 +186,11 @@ export default function App() {
     e.preventDefault();
     if (!commentContent.trim() || !selectedItem) return;
     
+    if (selectedItem.id === null || selectedItem.id === undefined) {
+      alert("데이터베이스에 저장되지 않은 검사 결과에는 댓글을 남길 수 없습니다. (Supabase 연결 상태나 환경 변수 설정 (.env)을 확인해 주세요.)");
+      return;
+    }
+    
     const author = commentAuthor.trim() || "익명";
     try {
       const res = await axios.post(`${API_BASE_URL}/history/${selectedItem.id}/comments`, {
@@ -195,12 +200,19 @@ export default function App() {
       setComments([...comments, res.data]);
       setCommentContent("");
     } catch (err) {
-      alert("댓글 저장 실패");
+      const errMsg = err.response?.data?.detail || err.message || "알 수 없는 에러";
+      alert("댓글 저장 실패: " + errMsg);
     }
   };
 
   const handleAddReaction = async (emoji) => {
     if (!selectedItem) return;
+    
+    if (selectedItem.id === null || selectedItem.id === undefined) {
+      alert("데이터베이스에 저장되지 않은 검사 결과에는 리액션을 남길 수 없습니다. (Supabase 연결 상태나 환경 변수 설정 (.env)을 확인해 주세요.)");
+      return;
+    }
+    
     try {
       const res = await axios.post(`${API_BASE_URL}/history/${selectedItem.id}/reactions`, {
         emoji
@@ -214,13 +226,19 @@ export default function App() {
       }
       setReactions(updatedReactions);
     } catch (err) {
-      console.error("리액션 저장 실패:", err);
+      const errMsg = err.response?.data?.detail || err.message || "알 수 없는 에러";
+      alert("리액션 저장 실패: " + errMsg);
     }
   };
 
   const handleChatSubmit = async (e) => {
     e.preventDefault();
     if (!chatInput.trim() || loadingChat || !selectedItem) return;
+    
+    if (selectedItem.id === null || selectedItem.id === undefined) {
+      alert("데이터베이스에 저장되지 않은 검사 결과에는 Q&A 질문을 할 수 없습니다. (Supabase 연결 상태나 환경 변수 설정 (.env)을 확인해 주세요.)");
+      return;
+    }
     
     const query = chatInput.trim();
     setChatInput("");
@@ -240,9 +258,10 @@ export default function App() {
           : item
       ));
     } catch (err) {
+      const errMsg = err.response?.data?.detail || err.message || "추가 분석 중 에러가 발생했습니다.";
       setChatHistory(prev => prev.map(item => 
         item.query === query && item.loading 
-          ? { query, answer: "추가 분석 중 에러가 발생했습니다. 잠시 후 다시 시도해 주세요.", loading: false } 
+          ? { query, answer: `추가 분석 중 에러가 발생했습니다. (이유: ${errMsg})`, loading: false } 
           : item
       ));
     } finally {
