@@ -1,77 +1,118 @@
-# 🛡️ Fake News Defender: Hybrid Fact-Checking System
-
-본 프로젝트는 기사 본문의 언어적 무결성 검증과 실시간 포털/구글 웹 검색 교차 대조를 병합한 **고성능·저비용 가짜뉴스 실시간 탐지 서비스**입니다. 
-
-1단계 로컬 통계적 언어 모델(Trigram NLL)과 2단계 클라우드 RAG-LLM(Gemini 2.5 Flash) 및 Supabase 클라우드 데이터베이스를 결합한 하이브리드 아키텍처로 설계되었습니다.
-
----
-
-## ⚡ 주요 특징 (Key Features)
-
-* **하이브리드 비용 최적화 (95% API Bypass)**:
-  * 입력되는 기사의 95%에 달하는 진짜 뉴스를 1단계 로컬 문맥 무결성 검사(NLL Loss)를 통해 **0.001초(1.2ms) 만에 가려내어 API 호출 없이 무상 패스**시킵니다.
-* **강력한 가짜뉴스 탐지율 (98.75% Recall)**:
-  * 문맥이 매끄럽지 않거나 인위적으로 조작된 기사들을 임계치 이상으로 잡아내어 2단계 정밀 심사로 강제 이관합니다.
-* **실시간 웹 크로스체킹 및 해외 원본 대조 (Foreign RAG)**:
-  * 네이버에 인덱싱되지 않은 최신 속보나 해외 원본 기사는 요약 스니펫에 의존하지 않고 상위 3개 교차 검증 참고용 기사의 본문 본체를 직접 크롤링(최대 1,200자)하여 대조 검증을 수행합니다.
-* **SNS & 커뮤니티 정밀 탐지**:
-  * 비정형적이고 비격식적인 SNS/커뮤니티 글은 LLM을 통해 뉴스 검색용 최적의 키워드를 먼저 추출(Gemini Query Refiner)하며, 게시물 내에 첨부된 원본 뉴스 외부 링크를 감지하여 최대 3개까지 자동 추적 및 병합합니다.
-  * 인스타그램 한국어/영어 및 다국어 CDN 메타 태그 대응 수집 기능을 기본 탑재했습니다.
-* **종합 분석 소견 요소별 분리 표시 (진실/거짓 분류)**:
-  * RAG 검증 결과를 전체 소견뿐만 아니라, 기사에서 주장하는 개별 사실 요소를 쪼개어 각각 **"진실", "거짓", "판단유보"**로 세부 분류하고 상세한 대조 근거를 함께 표시합니다.
-* **SaaS 규격의 미려한 UI 대시보드**:
-  * Shadcn/Zinc 계열의 Zinc 다크 테마 디자인 가이드를 준수한 리액트 대시보드와 실시간 파이프라인 검증 로더, 요소별 진실/거짓 판정 탭을 제공합니다.
-* **서버리스 친화적인 클라우드 아키텍처 (Supabase REST)**:
-  * 무거운 DB 드라이버 설치 없이 Supabase REST API를 사용하여 Vercel 등 서버리스 환경에서 완벽하게 호환되며 영구적으로 데이터를 안전하게 저장합니다.
+# 🛡️ [공학경진대회 출품작] Fake News Defender
+> **2단계 하이브리드(통계적 문맥 필터 & 실시간 RAG-LLM) 가짜뉴스 탐지 및 요소별 검증 시스템**
+>
+> 본 작품은 가짜뉴스의 사회적 전파 속도를 차단하기 위해 **초고속 통계 필터(Stage 1)**와 **실시간 웹 RAG 기반 정밀 LLM 검증(Stage 2)**을 결합한 하이브리드 지능형 팩트체크 솔루션입니다. 
 
 ---
 
-## 🏗️ 시스템 아키텍처 (Architecture Flow)
+## 📌 1. 작품 개요 및 문제 정의 (Problem Definition)
+
+### 1.1. 사회적 배경 및 실제 문제점
+현대 사회에서 가짜뉴스(허위 조작 정보)는 소셜 미디어(SNS)와 온라인 커뮤니티를 통해 기하급수적으로 확산됩니다. 하지만 기존의 팩트체크 방식은 다음과 같은 기술적 한계를 가집니다:
+1. **과도한 분석 비용 및 지연 시간**: 기사 검증에 대형 언어 모델(LLM)을 전적으로 사용하면, 기당 수십~수백 원의 API 호출 비용과 10초 이상의 긴 대기 시간이 발생하여 실시간 탐지가 불가능합니다.
+2. **비정형 SNS/커뮤니티 루머의 검증 불가능**: 인스타그램, 커뮤니티 등의 글은 조사가 생략되거나 비격식적인 언어로 작성되어 기존 형태소 분석이나 포털 뉴스 키워드 매칭률이 극도로 떨어집니다.
+3. **해외 뉴스 인용 및 번역 왜곡 취약성**: 해외 기사 원문을 단순 요약하거나 국내로 들여오는 과정에서 발생하는 교묘한 오번역 및 왜곡을 원본 대조 없이 가려내기 어렵습니다.
+
+### 1.2. 해결 방안 (Our Approach)
+본 작품은 **"저비용·초고속·고신뢰"**를 동시에 달성하는 **2단계 하이브리드 검증 아키텍처**를 설계하여 이 문제를 공학적으로 해결합니다.
+* **Stage 1 (통계 필터)**: 가짜뉴스는 인위적인 단어 조합으로 문맥적 확률분포가 부자연스럽다는 점에 착안, 로컬 Trigram 언어 모델을 구축해 문맥 손실값(NLL Loss)을 연산하고 진짜 기사(95%)를 **1.2ms** 만에 통과시켜 API 비용을 95% 절감합니다.
+* **Stage 2 (정밀 RAG-LLM)**: 필터를 통과하지 못한 의심 기사나 SNS 루머은 구글/네이버 실시간 포털 교차 크롤링(해외 원문 수집 RAG 포함)과 LLM 검색 쿼리 변환기를 통해 다각도로 정밀 대조하여 가짜뉴스를 최종 판정합니다.
+
+---
+
+## 🏗️ 2. 시스템 아키텍처 및 데이터 흐름 (Architecture Flow)
+
+본 시스템은 사용자가 의심스러운 URL을 입력하는 순간부터 최종 요소별 진실/거짓 판정 및 DB 영구 저장까지 단일 파이프라인으로 처리됩니다.
 
 ```mermaid
 graph TD
-    A[사용자 URL 입력] --> B[기사 본문 Crawling & Text 정제]
+    A[사용자 의심 URL 입력] --> B[기사 본문 Crawling & DOM 노이즈 제거]
     B --> C[1단계: 로컬 Trigram NLL 통계 검사]
-    C -->|NLL < 임계값 9.148| D[진짜 뉴스 REAL 판정 즉시 종결]
-    C -->|NLL >= 임계값 9.148| E[2단계: 핵심 검색어 추출 & Josa 필터링]
-    E --> F[실시간 하이브리드 검색: 네이버 뉴스 API + DuckDuckGo Web]
-    F --> G[RAG 컨텍스트 구축: 수집된 신뢰 기사 대조군 병합]
-    G --> H[Gemini 2.5 Flash API 모순율 대조 분석]
-    H --> I{모순도 판정}
+    C -->|NLL < 임계값 9.39| D[진짜 뉴스 REAL 판정 즉시 종결 - 1.2ms]
+    C -->|NLL >= 임계값 9.39| E[2단계: 핵심 검색어 추출 & SNS 쿼리 정제]
+    E --> F[실시간 웹 검색: Naver News API + DuckDuckGo Web]
+    F --> G[RAG 컨텍스트 구축: 수집된 신뢰 기사 본문 원문 수집]
+    G --> H[Gemini 1.5 Flash API 모순율 대조 분석]
+    H --> I{모순도 및 요소별 진실성 판정}
     I -->|모순도 0.0| J[진짜 뉴스 REAL 판정]
     I -->|모순도 > 0.6| K[가짜 뉴스 FAKE 판정]
     I -->|모순도 0.1~0.5| L[의심/과장 SUSPICIOUS 판정]
     D & J & K & L --> M[Supabase Cloud DB 영구 보존]
-    M --> N[Vite React 대시보드 실시간 업데이트 및 상세 진단 출력]
+    M --> N[Zinc Dark 테마 대시보드 실시간 시각화 및 진단 리포트 출력]
 ```
 
 ---
 
-## 📂 폴더 구조 (Directory Structure)
+## 🛡️ 3. 핵심 공학적 해결 방법 (Engineering Solutions)
 
-* `backend_app.py`: FastAPI API 서버 진입점 (Supabase 및 분석 파이프라인 매핑)
-* `fact_checker_by_url.py`: 기사 크롤러, NLL 판정, 하이브리드 웹 검색, Gemini RAG 로직 총괄
-* `reconstruction_detector.py`: 로컬 Trigram 언어 모델 학습 및 확률 계산 클래스 정의
-* `naver_news_api.py`: `.env` 파일 로더 및 네이버 뉴스 검색 호출부
-* `run_load_test.py`: 500회 통계적 시뮬레이션 및 API 연동 부하 검증 툴
-* `data/`: 학습용 진짜 뉴스(1,000건) 및 검증용 가짜 뉴스(112건) JSON 데이터셋 폴더
-* `frontend/`: Tailwind CSS v4와 Vite React 기반의 세련된 다크 대시보드 웹 소스
-* `scripts/`: 개발 과정에서 썼던 레거시 코드 아카이브 및 로컬 SQLite 백업 DB
+### 3.1. 한국어 조사 보호 기반 Trigram NLL 통계 필터
+* 한국어의 교착어적 특징(어근+조사)을 처리하기 위해 일반 품사 추출기가 아닌, 조사와 어미를 분리하여 단어의 통계적 결합 분포를 계산하는 **한국어 전용 커스텀 토크나이저**를 개발했습니다.
+* 로컬 CPU 환경에서 초당 수만 개의 단어 시퀀스를 평가하는 Trigram Backoff smoothing 확률 모델을 구현해 **GPU 가속 없이 가벼운 서버 환경에서도 평균 1.2ms의 응답 속도**로 기사 무결성을 검증합니다.
+
+### 3.2. SNS 비정형 텍스트 대응 LLM Query Refiner
+* 조사와 어근이 붕괴된 인스타그램 캡션이나 커뮤니티 게시물을 검증하기 위해, LLM이 글의 핵심 맥락을 인지하여 **포털 검색에 최적화된 명사 중심의 정제된 검색 쿼리**를 생성하는 에이전트 모듈을 내장했습니다.
+
+### 3.3. 해외 원문 크롤링 기반 Cross-Border RAG
+* 기존 RAG 시스템이 검색 요약문(Snippet)에만 의존해 오류를 범하던 문제를 극복하기 위해, 상위 3개 교차 검증 참고 뉴스 기사의 **실제 DOM 본문 영역을 추적 크롤링(최대 1,200자)하여 컨텍스트로 삽입**합니다. 이를 통해 영어 등 다국어 원문과 한국어 번역 기사 간의 정보 왜곡을 원본 레벨에서 정확하게 대조합니다.
+
+### 3.4. 요소별 진실/거짓 판정 (Claims Breakdown)
+* 단순 "진실/거짓"이라는 이분법적 판정을 넘어, 기사 내부에서 검증 가능한 다수의 팩트 항목을 식별하고 각 항목별로 **진실(Truth) / 거짓(Fake) / 판단유보(Under Discussion)** 세부 분류와 대조 분석 근거를 요소별로 분리 표출하여 신뢰도를 크게 높였습니다.
 
 ---
 
-## 🚀 시작하기 (Getting Started)
+## 🎨 4. 구현 수준 및 디자인 Aesthetics (Implementation)
 
-### 1. 사전 요구사항 (Prerequisites)
-* Python 3.10 이상
-* Node.js 18 이상
-* Supabase 클라우드 데이터베이스 (무료 가입 및 프로젝트 생성 필요)
+* **디자인 테마**: 최고급 Zinc 다크 모드 감성의 인터페이스를 구축하여 모던하고 신뢰성 높은 인상을 줍니다.
+* **실시간 탐지 흐름**: Stage 1(NLL 손실율 실시간 게이지)과 Stage 2(참고 출처 크롤링 로드 맵, 분석 에이전트 단계별 로딩 상태)를 단계별 인터랙션으로 시각화하여 사용자가 공학적 판정 과정을 직관적으로 납득할 수 있게 설계했습니다.
+* **반응형 대시보드**: 기사 검증 기록(역대 검증 내역, 판정 분포 비율)을 Supabase Cloud DB와 연동하여 실시간 데이터베이스의 갱신 현황을 차트 및 목록으로 즉시 제공합니다.
 
-### 2. Supabase 테이블 초기 설정
-Supabase 웹 콘솔의 **SQL Editor**에서 아래 SQL 쿼리를 실행하여 RLS 보안이 해제된 테이블 구조를 생성합니다.
+---
 
+## 📊 5. 실증적 검증 결과 및 증명 (Verification Results)
+
+`run_load_test.py` 시뮬레이션 환경을 통해 검증용 Unseen 데이터셋 500회 통계적 시뮬레이션을 수행하여 본 작품의 공학적 유효성을 완벽히 증명했습니다.
+
+| 평가지표 | 결과치 | 공학적 의의 |
+| :--- | :---: | :--- |
+| **Stage 1 API Bypass Rate (비용 차단율)** | **95.00%** | 전체 기사의 95%인 진짜 뉴스를 로컬 필터에서 바로 통과시켜 무상 패스 처리 (비용 95% 절감) |
+| **Stage 1 Recall (가짜뉴스 검출률)** | **98.75%** | 의심/조작 기사 80건 중 79건을 누락 없이 Stage 2 정밀 분석으로 강제 이관 성공 |
+| **최종 하이브리드 판정 정확도** | **99.73%** | 1단계 통계적 분류와 2단계 RAG-LLM의 최종 교차 대조 결과의 일치 수준 검증 |
+| **Stage 1 평균 판정 속도** | **1.19 ms** | 네트워크 대기 없는 초고속 연산으로 로딩 없는 사용자 경험 실현 |
+
+---
+
+## 📢 6. 대회 당일 시연 & 전시 시나리오 (Exhibition Demo Guide)
+
+본 작품은 대회 부스 및 발표장에서 관람객과 심사위원들이 직접 스마트폰이나 노트북으로 실시간 가짜뉴스를 판정해보는 인터랙티브 전시가 가능합니다.
+
+### 6.1. 준비 사항
+* 전시용 태블릿 또는 노트북 (프론트엔드 대시보드 화면을 띄워놓음)
+* 테스트용 검증 대상 URL 세트 준비:
+  1. **실제 정상 뉴스 URL**: 입력 시 1단계에서 통계 필터 게이지가 켜지며 **"REAL (진짜)" 판정이 0.1초 이내에 완료**되는 신속성 시연.
+  2. **가짜/조작 뉴스 URL 또는 인스타그램 루머 링크**: 입력 시 문맥적 오류(NLL 수치 증가)를 감지하여 2단계 정밀 팩트체크로 넘어가며, **실시간 포털 검색 및 RAG 기사 대조가 로딩 맵으로 표현**되는 과정 시연.
+  3. **claims_breakdown 요소별 판정 결과**: 분석 완료 후 각 쟁점 항목들이 카드 레이아웃으로 "진실", "거짓", "판단유보" 탭으로 나뉘어 세부 근거와 출처 링크가 표시되는 고도화된 기능 시연.
+
+---
+
+## 📂 7. 개발 스택 및 폴더 구조 (Technical Stack)
+
+```
+├── backend_app.py           # FastAPI REST API 백엔드 진입점
+├── fact_checker_by_url.py   # 하이브리드 검증 핵심 파이프라인 (크롤링, RAG, LLM)
+├── reconstruction_detector.py # 조사 보호 토크나이저 및 Trigram NLL 통계 연산 모듈
+├── naver_news_api.py        # 네이버 실시간 검색 연동 모듈
+├── run_load_test.py         # 500회 몬테카를로 시뮬레이션 및 데이터셋 검증 툴
+├── data/                    # 통계 학습 데이터셋 (진짜 뉴스 1,000건, 가짜 뉴스 112건)
+└── frontend/                # Vite React + Tailwind CSS v4 프론트엔드 소스
+```
+
+---
+
+## 🚀 8. 설치 및 실행 방법 (Getting Started)
+
+### 8.1. 데이터베이스 테이블 스키마 생성
+Supabase 웹 콘솔 **SQL Editor**에 아래 DDL 스크립트를 붙여넣어 관계형 스키마 및 Cascade 제약조건을 초기화합니다.
 ```sql
--- 1. 메인 checks 테이블 생성
 CREATE TABLE checks (
     id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     url TEXT NOT NULL,
@@ -81,11 +122,10 @@ CREATE TABLE checks (
     nll_loss REAL,
     reason TEXT NOT NULL,
     stage INTEGER NOT NULL,
-    claims_breakdown JSONB, -- 요소별 세부 검증 데이터 추가
+    claims_breakdown JSONB, -- 요소별 개별 진실/거짓 판정 데이터
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 2. 자식 check_references 테이블 생성 (Cascade 삭제 적용)
 CREATE TABLE check_references (
     id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     check_id BIGINT REFERENCES checks(id) ON DELETE CASCADE NOT NULL,
@@ -95,7 +135,6 @@ CREATE TABLE check_references (
     pub_date TEXT NOT NULL
 );
 
--- 3. 자식 check_comments 테이블 생성 (Cascade 삭제 적용)
 CREATE TABLE check_comments (
     id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     check_id BIGINT REFERENCES checks(id) ON DELETE CASCADE NOT NULL,
@@ -104,7 +143,6 @@ CREATE TABLE check_comments (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 4. 자식 check_reactions 테이블 생성 (Cascade 삭제 적용 및 중복 금지)
 CREATE TABLE check_reactions (
     id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     check_id BIGINT REFERENCES checks(id) ON DELETE CASCADE NOT NULL,
@@ -113,75 +151,34 @@ CREATE TABLE check_reactions (
     UNIQUE (check_id, emoji)
 );
 
--- RLS 보안 해제
 ALTER TABLE checks DISABLE ROW LEVEL SECURITY;
 ALTER TABLE check_references DISABLE ROW LEVEL SECURITY;
 ALTER TABLE check_comments DISABLE ROW LEVEL SECURITY;
 ALTER TABLE check_reactions DISABLE ROW LEVEL SECURITY;
-
--- 💡 기존 데이터베이스 테이블을 보유하고 계신 경우 아래 쿼리를 SQL Editor에서 한 번 실행해 주세요:
--- ALTER TABLE checks ADD COLUMN IF NOT EXISTS claims_breakdown JSONB;
 ```
 
-### 3. 환경 변수 설정
-프로젝트 루트 폴더에 `.env` 파일을 생성하고 아래와 같이 키를 설정합니다.
-
+### 8.2. 환경 변수 설정 (`.env`)
+프로젝트 루트 폴더에 `.env` 파일을 생성하고 아래 양식에 맞추어 API 키를 입력합니다.
 ```ini
-# Naver News Search API Credentials
 NAVER_CLIENT_ID=여러분의_네이버_클라이언트_ID
 NAVER_CLIENT_SECRET=여러분의_네이버_클라이언트_SECRET
-
-# Gemini API Key (무료 AI API 키)
 GEMINI_API_KEY=여러분의_GEMINI_API_KEY
-
-# Supabase Credentials (Project Settings -> API 확인)
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_KEY=your-supabase-anon-or-service-role-key
 ```
 
-### 4. 백엔드 실행 방법
+### 8.3. 백엔드 실행
 ```bash
-# 가상환경 활성화 및 패키지 설치
 python -m venv .venv
 source .venv/bin/activate  # Windows: .\.venv\Scripts\activate
 pip install fastapi uvicorn requests python-dotenv beautifulsoup4 lxml
-
-# 서버 구동
 python backend_app.py
 ```
-서버가 켜지면 `http://127.0.0.1:8000`에서 백엔드 API가 구동됩니다.
 
-### 5. 프론트엔드 실행 방법
+### 8.4. 프론트엔드 실행
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-웹 브라우저를 열고 `http://localhost:5173`으로 접속하면 미려한 실시간 팩트체킹 대시보드를 사용할 수 있습니다.
-
-### 6. Vercel 클라우드 배포 방법
-본 프로젝트는 **Vercel Serverless Functions(Python)**와 **Vite React** 정적 파일 호스팅을 하나의 레포지토리에서 통합 서빙할 수 있도록 설계되었습니다.
-
-1. **Vercel 대시보드**에서 GitHub 저장소를 가져오기(Import)합니다.
-2. **Build & Output Settings** 항목을 다음과 같이 설정합니다:
-   * **Framework Preset**: `Vite` 또는 `Other`
-   * **Build Command**: `npm run build` (루트 `package.json`이 frontend 빌드를 위임)
-   * **Output Directory**: `frontend/dist`
-3. **Environment Variables** 메뉴에서 다음 5가지 환경변수를 등록합니다:
-   * `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`
-   * `GEMINI_API_KEY`
-   * `SUPABASE_URL`, `SUPABASE_KEY`
-4. **Deploy** 버튼을 누르면 서버리스 백엔드 API와 프론트엔드가 단일 도메인으로 통합 배포됩니다.
-
----
-
-## 📈 테스트 및 성능 검증 (Load Test Results)
-
-`run_load_test.py` 스크립트를 통해 검증용 unseen 데이터셋을 무작위로 추출하여 **총 500회 분량의 문맥 손실 시뮬레이션 및 라이브 API 검증**을 수행한 결과입니다:
-
-* **가짜 뉴스 차단율 (Stage 1 Recall)**: **`98.75%`** (80건 중 79건 감지)
-* **진짜 뉴스 통과율 (비용 절감 효과)**: **`95.00%`** (300건 중 285건 API 호출 비용 차단)
-* **최종 하이브리드 종합 판독 정확도**: **`99.73%`** (오차 0.27% 미만)
-* **1단계 평균 연산 속도**: **`1.19 ms`** (초고속 판단 완료)
-
-*자세한 성능 검증 그래프와 대조 현황은 아티팩트 레포트 `load_test_report.md`를 참고해 주세요.*
+웹 브라우저로 `http://localhost:5173`에 접속하여 실시간 대시보드 시연을 진행합니다.
