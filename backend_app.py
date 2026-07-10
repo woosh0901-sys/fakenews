@@ -388,6 +388,70 @@ async def query_check(check_id: int, payload: QueryRequest):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"추가 분석 실패: {str(e)}")
 
+@app.post("/api/chat")
+async def chat_general(payload: QueryRequest):
+    user_query = payload.query.strip()
+    if not user_query:
+        raise HTTPException(status_code=400, detail="질문 내용을 입력해 주세요.")
+        
+    try:
+        # Run real-time hybrid search for the general query
+        from fact_checker_by_url import fetch_hybrid_news
+        print(f"[*] AI 팩트체커 자유 질문 실시간 웹 검색 실행 중: {user_query}")
+        sources = fetch_hybrid_news(user_query, display_count=5)
+        
+        sources_text = ""
+        for i, s in enumerate(sources):
+            sources_text += f"[참고 자료 {i+1}]\n제목: {s['title']}\n내용 요약: {s['description']}\n링크: {s['link']}\n\n"
+            
+        # Build Gemini prompt
+        from datetime import datetime
+        current_date = datetime.now().strftime("%Y년 %m월 %d일")
+        
+        prompt = (
+            f"현재 날짜: {current_date}\n"
+            "당신은 가짜 뉴스를 전문적으로 판정하는 팩트체커 AI 동반자입니다.\n"
+            "사용자가 특정 기사 링크가 아닌, 자유롭게 팩트체크 질문을 던졌습니다. 제공된 [추가 검색된 참고 자료]를 기반으로 사용자의 질문에 매우 상세하고 친절하며 객관적으로 답변해 주세요.\n\n"
+            "[사용자의 질문]\n"
+            f"{user_query}\n\n"
+            "[추가 검색된 참고 자료 목록]\n"
+            f"{sources_text if sources_text else '검색된 관련 기사가 없습니다.'}\n"
+            "답변 지침:\n"
+            "1. 질문 내용이 언론 보도나 팩트 상 사실(True)인지 거짓(False)인지 혹은 판단유보(Suspicious)인지 두괄식으로 명확히 답해 주세요.\n"
+            "2. 대조군 자료 및 교차 검증된 보도 내용을 바탕으로 논리정연하고 신뢰할 수 있게 설명하세요.\n"
+            "3. 한글로 친절하되 객관적인 어조로 상세히 서술해 주세요.\n"
+            "4. 마크다운 형식(글머리 기호, 굵은 글씨 등)을 활용해 가독성 있게 정리해 주세요."
+        )
+        
+        from fact_checker_by_url import GEMINI_API_KEY
+        
+        answer = "LLM 연동이 되어 있지 않아 팩트체크 대화 분석을 진행할 수 없습니다."
+        
+        if GEMINI_API_KEY and GEMINI_API_KEY.strip() and GEMINI_API_KEY.strip() != "YOUR_GEMINI_API_KEY":
+            g_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY.strip()}"
+            g_headers = {"Content-Type": "application/json"}
+            g_payload = {
+                "contents": [{"parts": [{"text": prompt}]}]
+            }
+            resp_g = requests.post(g_url, headers=g_headers, json=g_payload, timeout=25)
+            if resp_g.status_code == 200:
+                g_data = resp_g.json()
+                answer = g_data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            else:
+                answer = f"Gemini API 호출에 실패했습니다. (HTTP {resp_g.status_code})"
+        else:
+            answer = "서버에 GEMINI_API_KEY 환경 변수가 설정되지 않아 실시간 AI 답변 기능을 제공할 수 없습니다."
+            
+        return {
+            "query": user_query,
+            "answer": answer,
+            "sources": sources
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"AI 자유 질문 분석 실패: {str(e)}")
+
 @app.get("/api/history/{check_id}/comments")
 async def get_comments(check_id: int):
     if not SUPABASE_ENABLED:
