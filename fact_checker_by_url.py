@@ -108,80 +108,24 @@ def fetch_hybrid_news(query, display_count=3):
     네이버 뉴스 검색 API와 DuckDuckGo 실시간 웹 검색 결과를 모두 수집하고 병합하여
     네이버와 구글 검색을 완벽히 모방하는 하이브리드 대조 결과를 만듭니다.
     """
-    from concurrent.futures import ThreadPoolExecutor
+    # 1. 네이버 뉴스 검색 시도
+    naver_sources = fetch_naver_news(NAVER_CLIENT_ID, NAVER_CLIENT_SECRET, query, display_count=display_count)
+    print(f"    - 네이버 뉴스 검색 결과: {len(naver_sources)}개 수집됨.")
     
-    naver_sources = []
-    web_sources = []
-    
-    has_korean = bool(re.search(r'[가-힣]', query))
-    
-    def get_naver():
-        nonlocal naver_sources
-        try:
-            naver_sources = fetch_naver_news(NAVER_CLIENT_ID, NAVER_CLIENT_SECRET, query, display_count=display_count)
-            print(f"    - 네이버 뉴스 검색 결과: {len(naver_sources)}개 수집됨.")
-        except Exception as e:
-            print(f"    [-] 네이버 뉴스 검색 실패: {e}")
-
-    def get_ddg_ko():
-        nonlocal web_sources
-        if has_korean:
-            try:
-                res = fetch_duckduckgo_search(query, max_results=display_count)
-                web_sources.extend(res)
-                print(f"    - DuckDuckGo 한글 검색 결과: {len(res)}개 수집됨.")
-            except Exception as e:
-                print(f"    [-] DuckDuckGo 한글 검색 실패: {e}")
-
-    def get_ddg_en():
-        nonlocal web_sources
-        try:
-            if has_korean:
-                eng_query = translate_ko_to_en(query)
-                if eng_query and eng_query != query:
-                    print(f"    - 해외 기사 교차 대조를 위해 영어 번역 쿼리 실행: '{eng_query}'")
-                    res = fetch_duckduckgo_search(eng_query, max_results=display_count)
-                    web_sources.extend(res)
-                    print(f"    - DuckDuckGo 영문 검색 결과: {len(res)}개 수집됨.")
-            else:
-                res = fetch_duckduckgo_search(query, max_results=display_count)
-                web_sources.extend(res)
-                print(f"    - DuckDuckGo 영문 검색 결과: {len(res)}개 수집됨.")
-        except Exception as e:
-            print(f"    [-] DuckDuckGo 영문 검색 실패: {e}")
-
-    # 병렬로 실행하여 검색 지연 단축
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = [
-            executor.submit(get_naver),
-            executor.submit(get_ddg_ko),
-            executor.submit(get_ddg_en)
-        ]
-        # 모든 스레드가 완료될 때까지 대기
-        for future in futures:
-            future.result()
-            
-    # 3. 중복 제거하며 병합 (네이버 결과 우선순위, 해외 원본 기사 우선순위 부여)
+    # 2. DuckDuckGo 실시간 웹 검색 실행 (1회만 호출하여 속도 최적화)
+    web_sources = fetch_duckduckgo_search(query, max_results=display_count)
+    print(f"    - DuckDuckGo 웹 검색 결과: {len(web_sources)}개 수집됨.")
+        
+    # 3. 중복 제거하며 병합 (네이버 결과 우선순위)
     merged = []
     existing_links = set()
     
-    # (1) 네이버 뉴스 우선 추가
     for s in naver_sources:
         if s['link'] not in existing_links:
             merged.append(s)
             existing_links.add(s['link'])
             
-    # (2) 영어/해외 소스 추가 (제목에 한글이 없는 것을 탐지하여 우선순위 부여)
-    english_sources = [s for s in web_sources if not re.search(r'[가-힣]', s['title'])]
-    korean_web_sources = [s for s in web_sources if re.search(r'[가-힣]', s['title'])]
-    
-    for s in english_sources:
-        if s['link'] not in existing_links:
-            merged.append(s)
-            existing_links.add(s['link'])
-            
-    # (3) 나머지 한국어 웹 소스 추가
-    for s in korean_web_sources:
+    for s in web_sources:
         if s['link'] not in existing_links:
             merged.append(s)
             existing_links.add(s['link'])
@@ -297,7 +241,7 @@ def scrape_url_content(url, timeout=15):
         ])
         
         found_links = []
-        if is_community or (text and len(text) < 400):
+        if is_community or (text and len(text) < 150):
             news_patterns = [
                 r'news\.naver\.com', r'v\.daum\.net', r'news\.v\.daum\.net',
                 r'chosun\.com', r'donga\.com', r'joongang\.co\.kr', r'hani\.co\.kr',
@@ -998,7 +942,7 @@ def check_url_validity(url, nll_model=None, nll_threshold=5.6):
     
     print("\n[3] 실시간 포털 및 웹 검색 교차 검증 정보 수집 중...")
     # 실시간 처리 속도를 올리기 위해 기사 수를 3개로 제한 (네이버 뉴스 + DuckDuckGo 하이브리드)
-    sources = fetch_hybrid_news(search_query, display_count=5)
+    sources = fetch_hybrid_news(search_query, display_count=3)
     print(f"    - 수집된 신뢰 기사 개수: {len(sources)}개")
     for i, s in enumerate(sources):
         print(f"      ({i+1}) {s['title']} | {s['pubDate']}")

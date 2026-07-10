@@ -174,7 +174,7 @@ export default function App() {
     timers.push(setTimeout(() => setActiveStep(4), 3600));
 
     try {
-      const res = await axios.post(`${API_BASE_URL}/check`, { url: targetUrl });
+      const res = await axios.post(`${API_BASE_URL}/check`, { url: targetUrl }, { timeout: 90000 });
       timers.forEach(clearTimeout);
       setActiveStep(5);
       
