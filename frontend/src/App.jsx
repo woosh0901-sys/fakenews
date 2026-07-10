@@ -205,11 +205,26 @@ export default function App() {
     runCheck(urlInput);
   };
 
-  // 랜딩 페이지에서 검증하기 제출 → 대시보드로 전환 후 즉시 검증 실행
-  const handleLandingSubmit = (url) => {
-    setUrlInput(url);
-    setView("dashboard");
-    runCheck(url);
+  // 랜딩 페이지에서 검증하기 제출 → 대시보드로 전환 후 즉시 검증 또는 AI 챗봇 실행
+  const handleLandingSubmit = (inputVal) => {
+    const trimmed = inputVal.trim();
+    
+    // URL 판별: http/https로 시작하거나, 공백이 없고 도메인 패턴을 포함한 경우
+    const isUrl = trimmed.startsWith("http://") || 
+                  trimmed.startsWith("https://") || 
+                  (trimmed.split('/')[0].includes('.') && !trimmed.includes(' '));
+                  
+    if (isUrl) {
+      setUrlInput(trimmed);
+      setActiveTab("dashboard");
+      setView("dashboard");
+      runCheck(trimmed);
+    } else {
+      setActiveTab("assistant");
+      setView("dashboard");
+      setSelectedItem(null);
+      handleGeneralChatSubmit(null, trimmed);
+    }
   };
 
   // Delete item handler
