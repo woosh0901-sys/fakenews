@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
+import Landing from "./Landing";
 import { 
   Shield, 
   Search, 
@@ -35,6 +36,9 @@ export default function App() {
     return localStorage.getItem("theme") === "dark" || 
       (!localStorage.getItem("theme") && window.matchMedia("(prefers-color-scheme: dark)").matches);
   });
+
+  // View state: 첫 접속은 랜딩, 검증 시작/대시보드 보기 클릭 시 대시보드로 전환
+  const [view, setView] = useState("landing");
 
   // Data states
   const [urlInput, setUrlInput] = useState("");
@@ -143,10 +147,9 @@ export default function App() {
     loadItemDetails();
   }, [selectedItem]);
 
-  // Form submit handler
-  const handleCheck = async (e) => {
-    e.preventDefault();
-    if (!urlInput.trim()) return;
+  // 검증 실행 (대시보드 폼과 랜딩 페이지 양쪽에서 사용)
+  const runCheck = async (targetUrl) => {
+    if (loading || !targetUrl.trim()) return;
 
     setLoading(true);
     setActiveStep(1);
@@ -158,7 +161,7 @@ export default function App() {
     timers.push(setTimeout(() => setActiveStep(4), 3600));
 
     try {
-      const res = await axios.post(`${API_BASE_URL}/check`, { url: urlInput });
+      const res = await axios.post(`${API_BASE_URL}/check`, { url: targetUrl });
       timers.forEach(clearTimeout);
       setActiveStep(5);
       
@@ -181,6 +184,19 @@ export default function App() {
       const errMsg = err.response?.data?.detail || "탐지 분석 중 기술적 에러가 발생했습니다.";
       alert(errMsg);
     }
+  };
+
+  // Form submit handler
+  const handleCheck = (e) => {
+    e.preventDefault();
+    runCheck(urlInput);
+  };
+
+  // 랜딩 페이지에서 검증하기 제출 → 대시보드로 전환 후 즉시 검증 실행
+  const handleLandingSubmit = (url) => {
+    setUrlInput(url);
+    setView("dashboard");
+    runCheck(url);
   };
 
   // Delete item handler
@@ -349,6 +365,20 @@ export default function App() {
     { label: "4. 사실 검증", desc: "Gemini 클라우드 사실관계 판정" }
   ];
 
+  // 첫 화면: 랜딩 페이지
+  if (view === "landing") {
+    return (
+      <Landing
+        darkMode={darkMode}
+        setDarkMode={setDarkMode}
+        history={history}
+        loading={loading}
+        onSubmit={handleLandingSubmit}
+        onOpenDashboard={() => setView("dashboard")}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 flex transition-colors duration-200 font-sans">
       
@@ -356,8 +386,12 @@ export default function App() {
       <aside className="hidden lg:flex w-80 shrink-0 flex-col bg-white dark:bg-neutral-900 border-r border-neutral-200 dark:border-neutral-800 p-6 sticky top-0 h-screen justify-between shadow-sm z-30 font-sans">
         <div className="space-y-8">
           
-          {/* Logo */}
-          <div className="flex items-center gap-3">
+          {/* Logo (클릭 시 랜딩으로 복귀) */}
+          <div
+            className="flex items-center gap-3 cursor-pointer"
+            onClick={() => setView("landing")}
+            title="메인 페이지로 이동"
+          >
             <div className="p-2.5 bg-brand-500 dark:bg-brand-400 rounded-lg text-white shadow-md shadow-brand-500/20">
               <Shield size={24} />
             </div>
