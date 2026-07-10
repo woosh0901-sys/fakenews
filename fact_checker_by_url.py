@@ -560,7 +560,7 @@ def call_gemini_api(prompt, response_mime_type=None, temperature=None, max_outpu
         return None
     
     # 사용할 모델 목록 (우선순위 순서)
-    models = ["gemini-2.0-flash", "gemini-1.5-flash"]
+    models = ["gemini-2.5-flash", "gemini-2.0-flash-lite"]
     
     for model in models:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY.strip()}"
