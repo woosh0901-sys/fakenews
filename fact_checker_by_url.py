@@ -353,20 +353,51 @@ def scrape_instagram_post(url):
         og_title_text = og_title['content'].strip() if og_title and og_title.get('content') else ""
         og_desc_text = og_desc['content'].strip() if og_desc and og_desc.get('content') else ""
 
-        # og:title 형식: '{표시 이름} on Instagram: "{캡션 전문}"'
+        # Robust caption extraction (supports multilingual formats including English, Korean, etc.)
         caption = ""
         author = ""
+        username = ""
+        post_date = ""
+        
+        # 1. Try English og:title format
         title_match = re.match(r'^(.*?) on Instagram:\s*[\"“](.*)[\"”]\s*$', og_title_text, re.DOTALL)
         if title_match:
             author = title_match.group(1).strip()
             caption = title_match.group(2).strip()
+            
+        # 2. Try Korean og:title format: 'Instagram의 {표시 이름}: "{캡션 전문}"'
+        if not caption:
+            ko_title_match = re.match(r'^Instagram의\s+(.*?):\s*[\"“](.*)[\"”]\s*$', og_title_text, re.DOTALL)
+            if ko_title_match:
+                author = ko_title_match.group(1).strip()
+                caption = ko_title_match.group(2).strip()
 
-        # og:description 형식: '{좋아요}, {댓글} - {유저명} on {날짜}: "{캡션}"'
+        # 3. Try English og:description format
         desc_match = re.match(r'^.*? - ([A-Za-z0-9_.]+) on ([^:]+):\s*[\"“](.*)[\"”]\s*$', og_desc_text, re.DOTALL)
-        username = desc_match.group(1) if desc_match else ""
-        post_date = desc_match.group(2).strip() if desc_match else ""
-        if not caption and desc_match:
-            caption = desc_match.group(3).strip()
+        if desc_match:
+            username = desc_match.group(1)
+            post_date = desc_match.group(2).strip()
+            if not caption:
+                caption = desc_match.group(3).strip()
+                
+        # 4. Try Korean og:description format: '좋아요 {N}개, 댓글 {M}개 - Instagram의 {유저명}님: "{캡션}"'
+        if not caption:
+            ko_desc_match = re.search(r'Instagram의\s+([A-Za-z0-9_.]+)님:\s*[\"“](.*)[\"”]\s*$', og_desc_text, re.DOTALL)
+            if ko_desc_match:
+                username = ko_desc_match.group(1)
+                caption = ko_desc_match.group(2).strip()
+
+        # 5. Universal Fallback: Just extract the first double-quoted/curly-quoted text block
+        if not caption:
+            quote_match = re.search(r'[\"“](.*)[\"”]', og_title_text, re.DOTALL)
+            if quote_match:
+                caption = quote_match.group(1).strip()
+                author = og_title_text.split("on Instagram")[0].split("Instagram의")[-1].split(":")[0].strip()
+                
+        if not caption:
+            quote_match = re.search(r'[\"“](.*)[\"”]', og_desc_text, re.DOTALL)
+            if quote_match:
+                caption = quote_match.group(1).strip()
 
         if not caption:
             print("[-] 인스타그램 캡션을 추출하지 못했습니다. 비공개 계정이거나 캡션이 없는 게시물일 수 있습니다.")
