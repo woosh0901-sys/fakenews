@@ -5,3 +5,4 @@ pydantic
 python-dotenv
 uvicorn
 lxml
+httpx

@@ -46,7 +46,7 @@ def fetch_duckduckgo_search(query, max_results=3):
     ]
     
     try:
-        resp = requests.post(url, headers=headers, data=data, timeout=10)
+        resp = requests.post(url, headers=headers, data=data, timeout=4)
         if resp.status_code == 200:
             soup = BeautifulSoup(resp.text, 'html.parser')
             # DuckDuckGo HTML 검색 결과 파싱
@@ -457,7 +457,12 @@ def strip_josa(word):
     """
     한글 단어 뒤에 붙는 대표적인 조사들을 지워 명사 원형만 남깁니다.
     """
-    protected_words = {"국가", "회의", "결과", "효과", "통과", "온도", "태도", "속도", "지도", "제도", "도로", "서로", "나이", "아이", "오이", "차이", "주의", "정의", "합의", "평화", "대화", "변화", "문화", "영화", "전화"}
+    # 한글 명사 원형 보호를 위한 예외 명사 사전 대폭 강화
+    protected_words = {
+        "국가", "회의", "결과", "효과", "통과", "온도", "태도", "속도", "지도", "제도", "도로", "서로", "나이", "아이", "오이", "차이", 
+        "주의", "정의", "합의", "평화", "대화", "변화", "문화", "영화", "전화", "의사", "교사", "판사", "검사", "조사", "수사", "인사",
+        "감사", "역사", "회사", "행사", "공사", "기사", "식사", "상사", "고사", "대사", "천사", "박사", "석사", "학사", "유사", "묘사"
+    }
     if word in protected_words:
         return word
     josa_suffixes = ["에서", "한테", "부터", "까지", "으로", "처럼", "하고", "이며", "은", "는", "이", "가", "을", "를", "의", "에", "와", "과", "도", "만", "랑", "며", "로"]
@@ -475,11 +480,14 @@ def extract_keywords_fast(title):
     cleaned = re.sub(r'[^가-힣a-zA-Z0-9\s]', ' ', title)
     words = cleaned.split()
     
-    # 팩트체크 검색어로서 유용하지 않은 일반 서술어/조사류/시간단어/의미없는 1글자 단어 필터링
+    # 팩트체크 검색어로서 유용하지 않은 일반 서술어/조사류/시간단어/의미없는 1글자 단어 필터링 사전 대폭 확장
     stopwords = [
         "오늘", "내일", "어제", "올해", "내년", "최근", "하루", "이틀", "이번", "주말", "평일", "휴일", "명절", 
         "기자", "뉴스", "보도", "착수", "개발", "기술", "경찰", "정부", "공고", "지원", "선정", "했다", "한다", "밝혔다", "적발", "검거", "조사",
-        "및", "등", "더", "또", "속", "과", "와", "한", "그", "저", "요", "네", "아", "오", "제", "매", "수", "것", "등등"
+        "및", "등", "더", "또", "속", "과", "와", "한", "그", "저", "요", "네", "아", "오", "제", "매", "수", "것", "등등",
+        "진짜", "가짜", "충격", "결국", "의혹", "논란", "사실", "해명", "공개", "주장", "전면", "부인", "반박", "발표", "확인", "의문", "루머",
+        "네티즌", "네티즌들", "커뮤니티", "누리꾼", "누리꾼들", "SNS", "인스타그램", "트위터", "유튜브", "영상", "사진", "포착", "근황", "공식",
+        "입장", "발언", "논란이", "논란은", "의혹이", "의혹은", "충격적인", "발칵", "뒤집힌", "난리", "난리난"
     ]
     
     filtered = []
@@ -490,8 +498,16 @@ def extract_keywords_fast(title):
             if len(cleaned_word) >= 1 and cleaned_word not in stopwords:
                 filtered.append(cleaned_word)
             
+    # 중복 제거 및 순서 보존
+    seen = set()
+    unique_filtered = []
+    for w in filtered:
+        if w not in seen:
+            seen.add(w)
+            unique_filtered.append(w)
+            
     # 핵심 명사 최대 10개 선택 (이벤트 핵심 액션 단어 유실 방지)
-    return filtered[:10]
+    return unique_filtered[:10]
 
 def call_gemini_api(prompt, response_mime_type=None, temperature=None, max_output_tokens=None):
     """

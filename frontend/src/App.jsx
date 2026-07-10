@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import Landing from "./Landing";
 import { 
@@ -31,6 +31,9 @@ import {
 const API_BASE_URL = "/api";
 
 export default function App() {
+  // Timer references for memory cleanup
+  const activeTimersRef = useRef([]);
+
   // Theme state
   const [darkMode, setDarkMode] = useState(() => {
     return localStorage.getItem("theme") === "dark" || 
@@ -160,26 +163,40 @@ export default function App() {
     loadItemDetails();
   }, [selectedItem]);
 
+  // Cleanup all active timers on unmount
+  useEffect(() => {
+    return () => {
+      activeTimersRef.current.forEach(clearTimeout);
+      activeTimersRef.current = [];
+    };
+  }, []);
+
   // 검증 실행 (대시보드 폼과 랜딩 페이지 양쪽에서 사용)
   const runCheck = async (targetUrl) => {
     if (loading || !targetUrl.trim()) return;
+
+    // Clear any existing timers first
+    activeTimersRef.current.forEach(clearTimeout);
+    activeTimersRef.current = [];
 
     setLoading(true);
     setActiveStep(1);
     
     // Simulate steps visually to guide the user through the pipeline
-    const timers = [];
-    timers.push(setTimeout(() => setActiveStep(2), 1200));
-    timers.push(setTimeout(() => setActiveStep(3), 2400));
-    timers.push(setTimeout(() => setActiveStep(4), 3600));
+    const t2 = setTimeout(() => setActiveStep(2), 1200);
+    const t3 = setTimeout(() => setActiveStep(3), 2400);
+    const t4 = setTimeout(() => setActiveStep(4), 3600);
+    
+    activeTimersRef.current = [t2, t3, t4];
 
     try {
       const res = await axios.post(`${API_BASE_URL}/check`, { url: targetUrl }, { timeout: 90000 });
-      timers.forEach(clearTimeout);
+      activeTimersRef.current.forEach(clearTimeout);
+      activeTimersRef.current = [];
       setActiveStep(5);
       
       // Delay slightly so user sees step 5 (success) before update
-      setTimeout(async () => {
+      const tSuccess = setTimeout(async () => {
         setUrlInput("");
         setLoading(false);
         await loadData();
@@ -191,8 +208,11 @@ export default function App() {
         });
       }, 500);
       
+      activeTimersRef.current.push(tSuccess);
+      
     } catch (err) {
-      timers.forEach(clearTimeout);
+      activeTimersRef.current.forEach(clearTimeout);
+      activeTimersRef.current = [];
       setLoading(false);
       const errMsg = err.response?.data?.detail || "탐지 분석 중 기술적 에러가 발생했습니다.";
       alert(errMsg);
