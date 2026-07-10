@@ -92,10 +92,20 @@ async def check_url(payload: CheckRequest):
                     "reason": result['reason'],
                     "stage": int(result['stage'])
                 }
+                if 'claims_breakdown' in result:
+                    check_data['claims_breakdown'] = result['claims_breakdown']
 
                 resp = requests.post(f"{SUPABASE_URL}/rest/v1/checks", headers=headers, json=check_data)
                 if resp.status_code != 201:
-                    raise Exception(f"Supabase checks 저장 실패 (HTTP {resp.status_code}): {resp.text}")
+                    # Fallback: if 'claims_breakdown' column doesn't exist yet in checks table, retry without it
+                    if 'claims_breakdown' in check_data:
+                        print("[!] Warning: 'claims_breakdown' column might be missing. Retrying insert without it...")
+                        del check_data['claims_breakdown']
+                        resp = requests.post(f"{SUPABASE_URL}/rest/v1/checks", headers=headers, json=check_data)
+                        if resp.status_code != 201:
+                            raise Exception(f"Supabase checks 저장 실패 (HTTP {resp.status_code}): {resp.text}")
+                    else:
+                        raise Exception(f"Supabase checks 저장 실패 (HTTP {resp.status_code}): {resp.text}")
 
                 inserted_check = resp.json()[0]
                 check_id = inserted_check['id']

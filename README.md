@@ -76,6 +76,7 @@ CREATE TABLE checks (
     nll_loss REAL,
     reason TEXT NOT NULL,
     stage INTEGER NOT NULL,
+    claims_breakdown JSONB, -- 요소별 세부 검증 데이터 추가
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -112,6 +113,9 @@ ALTER TABLE checks DISABLE ROW LEVEL SECURITY;
 ALTER TABLE check_references DISABLE ROW LEVEL SECURITY;
 ALTER TABLE check_comments DISABLE ROW LEVEL SECURITY;
 ALTER TABLE check_reactions DISABLE ROW LEVEL SECURITY;
+
+-- 💡 기존 데이터베이스 테이블을 보유하고 계신 경우 아래 쿼리를 SQL Editor에서 한 번 실행해 주세요:
+-- ALTER TABLE checks ADD COLUMN IF NOT EXISTS claims_breakdown JSONB;
 ```
 
 ### 3. 환경 변수 설정

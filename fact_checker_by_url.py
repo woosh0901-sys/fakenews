@@ -197,10 +197,53 @@ def scrape_url_content(url):
         for element in soup(["script", "style", "nav", "footer", "header", "aside", "noscript", "iframe"]):
             element.decompose()
             
+        # Remove elements commonly representing popular articles, sidebars, related posts, ads, tags etc.
+        noise_keywords = [
+            "popular", "ranking", "recommend", "relation", "related", "sidebar", "comment", "reply", 
+            "social", "share", "ad-", "banner", "tag", "widget", "aside", "navigation",
+            "side_list", "hot_news", "popular_news", "side_area", "right_area",
+            "popular-news", "related-news", "most-read", "trending", "w_side_list"
+        ]
+        
+        # Collect noise elements first, then decompose to avoid modifying tree during iteration
+        to_decompose = []
+        for element in soup.find_all(True):
+            if element.parent is None:
+                continue
+            if element.get('class'):
+                cls_list = element.get('class')
+                cls_str = " ".join(cls_list).lower() if isinstance(cls_list, list) else str(cls_list).lower()
+                if any(k in cls_str for k in noise_keywords):
+                    to_decompose.append(element)
+                    continue
+            if element.get('id'):
+                el_id = str(element.get('id')).lower()
+                if any(k in el_id for k in noise_keywords):
+                    to_decompose.append(element)
+                    continue
+                    
+        for el in to_decompose:
+            try:
+                el.decompose()
+            except Exception:
+                pass
+            
         text = ""
         # Naver News인 경우 특정 본문 영역 추출
         if "news.naver.com" in url:
-            article_body = soup.find('article', id='dic_area') or soup.find('div', id='articleBodyContents')
+            article_body = soup.find('article', id='dic_area') or soup.find('div', id='articleBodyContents') or soup.find('div', id='articleBody')
+            if article_body:
+                text = article_body.get_text(separator=' ').strip()
+        elif "news.sbs.co.kr" in url:
+            article_body = soup.find('div', class_='main_text') or soup.find('div', itemprop='articleBody')
+            if article_body:
+                text = article_body.get_text(separator=' ').strip()
+        elif "v.daum.net" in url or "news.v.daum.net" in url:
+            article_body = soup.find('div', class_='article_view') or soup.find('section', class_='box_article')
+            if article_body:
+                text = article_body.get_text(separator=' ').strip()
+        elif "news.nate.com" in url:
+            article_body = soup.find('div', id='realArtcBody') or soup.find('div', id='artcBody')
             if article_body:
                 text = article_body.get_text(separator=' ').strip()
                 
@@ -216,16 +259,17 @@ def scrape_url_content(url):
                 
         # 연속된 공백 및 줄바꿈 정리
         text = re.sub(r'\s+', ' ', text).strip()
-        
-        # 제목 가짜 문자열 정제
         title = re.sub(r'\s+', ' ', title).strip()
         
-        # 3. 만약 본문이 너무 짧고 커뮤니티 글처럼 외부 뉴스 링크를 포함하고 있는 경우
-        # 본문에서 외부 기사 링크를 찾아 원본 뉴스 기사를 추가로 크롤링하여 본문에 병합합니다.
-        if text and len(text) < 400:
-            print("    [!] 본문이 너무 짧습니다. 외부 뉴스 링크가 포함되어 있는지 탐색합니다...")
-            news_link = None
-            # 기사 도메인 패턴
+        # 3. 커뮤니티 게시물 또는 본문이 짧고 외부 뉴스 링크가 포함되어 있는 경우 원본 뉴스 기사를 크롤링하여 본문에 병합
+        is_community = any(dom in url for dom in [
+            "dcinside.com", "fmkorea.com", "ruliweb.com", "clien.net", "ppomppu.co.kr", 
+            "instiz.net", "inven.co.kr", "todayhumor.co.kr", "mlbpark.donga.com", 
+            "slrclub.com", "pann.nate.com", "bobaedream.co.kr", "theqoo.net", "instiz"
+        ])
+        
+        found_links = []
+        if is_community or (text and len(text) < 400):
             news_patterns = [
                 r'news\.naver\.com', r'v\.daum\.net', r'news\.v\.daum\.net',
                 r'chosun\.com', r'donga\.com', r'joongang\.co\.kr', r'hani\.co\.kr',
@@ -237,24 +281,35 @@ def scrape_url_content(url):
                 r'asiae\.co\.kr', r'etnews\.com', r'digitaltimes'
             ]
             
-            # <a> 태그에서 기사 도메인 검색
             for a in soup.find_all('a', href=True):
                 href = a['href']
                 for pat in news_patterns:
-                    if re.search(pat, href):
-                        news_link = href
+                    if re.search(pat, href) and href not in found_links:
+                        found_links.append(href)
                         break
-                if news_link:
-                    break
-                    
-            if news_link:
-                print(f"    [+] 커뮤니티 게시물 내 뉴스 원본 링크 감지: {news_link}")
-                print("    - 원본 뉴스 링크를 추가로 크롤링하여 본문에 결합합니다.")
-                original_article = scrape_url_content(news_link)
-                if original_article and original_article['content']:
-                    title = f"[연동] {original_article['title']} (출처: {title})"
-                    text = f"{text} \n\n[연동 뉴스 원본 본문]\n{original_article['content']}"
-                    
+                        
+            # 본문 텍스트 내에 포함된 raw URL 탐색
+            raw_urls = re.findall(r'https?://[^\s<>"]+', text)
+            for r_url in raw_urls:
+                for pat in news_patterns:
+                    if re.search(pat, r_url) and r_url not in found_links:
+                        found_links.append(r_url)
+                        break
+                        
+        if found_links:
+            print(f"    [+] 본문 내 뉴스 원본 링크 감지: {found_links}")
+            crawled_contents = []
+            for link in found_links[:3]:  # 최대 3개 크롤링
+                if link != url:  # 무한 루프 방지
+                    print(f"    - 원본 뉴스 링크 추가 크롤링 진행: {link}")
+                    original_article = scrape_url_content(link)
+                    if original_article and original_article['content']:
+                        crawled_contents.append(f"[연동 뉴스 원본: {original_article['title']}]\n{original_article['content']}")
+            
+            if crawled_contents:
+                merged_text = "\n\n".join(crawled_contents)
+                text = f"{text} \n\n[연동 뉴스 원본 본문 목록]\n{merged_text}"
+                
         return {
             'url': url,
             'title': title,
@@ -443,12 +498,26 @@ def fact_check_article_with_sources(target_title, target_content, sources, conte
         return {
             "verdict": "SUSPICIOUS",
             "reason": "검색된 관련 신뢰 뉴스 기사가 전혀 없습니다. 신생 루머이거나 극히 폐쇄적인 커뮤니티성 허위 사실일 가능성이 높습니다.",
-            "contradiction_score": 0.8
+            "contradiction_score": 0.8,
+            "claims_breakdown": []
         }
 
     sources_text = ""
     for i, s in enumerate(sources):
-        sources_text += f"[참고 뉴스 {i+1}]\n제목: {s['title']}\n요약: {s['description']}\n출처 링크: {s['link']}\n\n"
+        ref_body = ""
+        # Crawl actual body only for the top 3 sources to optimize performance and prevent API delays
+        if i < 3:
+            try:
+                print(f"      - [참고 자료 {i+1}] 본문 크롤링 진행: {s['link']}")
+                ref_art = scrape_url_content(s['link'])
+                if ref_art and ref_art['content']:
+                    # Limit to 1200 characters to prevent context bloat
+                    ref_body = ref_art['content'][:1200]
+            except Exception as e:
+                print(f"      - [참고 자료 {i+1}] 크롤링 실패: {e}")
+                
+        desc = ref_body if ref_body else s['description']
+        sources_text += f"[참고 뉴스 {i+1}]\n제목: {s['title']}\n요약/본문 내용: {desc}\n출처 링크: {s['link']}\n\n"
 
     from datetime import datetime
     current_date = datetime.now().strftime("%Y년 %m월 %d일")
@@ -456,24 +525,33 @@ def fact_check_article_with_sources(target_title, target_content, sources, conte
     prompt = (
         f"현재 날짜: {current_date}\n"
         "당신은 가짜 뉴스와 조작된 허위 기사를 가려내는 전문 팩트체커 AI입니다.\n"
-        f"아래 제공된 [검증 대상 {content_label}]의 사실 관계와, 포털 뉴스 API를 통해 실시간 검색된 공식 [참고 뉴스 기사 목록]을 상호 비교하십시오.\n\n"
+        f"아래 제공된 [검증 대상 {content_label}]의 사실 관계와, 실시간 검색 및 크롤링을 통해 수집된 공식 [참고 뉴스 기사 목록]을 상호 비교하십시오.\n\n"
         f"[검증 대상 {content_label}]\n"
         f"제목: {target_title}\n"
-        f"본문: {target_content[:500]}\n\n" # 속도 개선을 위해 1500자 -> 500자로 제한 (컨텍스트 로딩 시간 단축)
+        f"본문: {target_content[:1000]}\n\n"
         "[참고 뉴스 기사 목록]\n"
         f"{sources_text}\n"
         "검증 지침:\n"
-        f"1. 참고 뉴스 목록과 비교했을 때, 검증 대상 {content_label}가 없는 사실을 창작했거나 모순되는 주장을 하는지 판단하세요.\n"
-        "2. 인물의 발언, 사건 여부, 통계 수치 등이 다르게 보도되었는지 대조하세요.\n"
-        "3. 판단 종류:\n"
+        f"1. 참고 뉴스 목록과 비교했을 때, 검증 대상 {content_label}가 없는 사실을 임의로 창작했거나 상호 모순되는 주장을 하는지 판단하세요.\n"
+        "2. 인물의 발언, 실제 사건 발생 여부, 통계 수치 등이 참고 기사와 다르게 왜곡되거나 허위로 작성되었는지 대조하세요.\n"
+        "3. SNS/커뮤니티 글은 공식 뉴스 기사에 비해 왜곡, 루머, 과장이 섞이기 쉽습니다. 공식 기사에서 다루지 않은 단순 폭로나 미확인 주장은 'SUSPICIOUS'로 분류하고 사유를 상세히 서술하세요.\n"
+        "4. 해외 기사 인용의 경우, 영어 및 해외 원본 자료와 국내 보도 자료를 상호 검증하여 실제 번역이나 인용 과정에서 왜곡이 있었는지도 면밀히 살펴봐 주세요.\n"
+        "5. 판단 종류:\n"
         "   - REAL: 참고 뉴스들과 내용(사건, 수치, 발언)이 거의 일치하는 정상 보도 기사인 경우\n"
         "   - FAKE: 중요 팩트나 수치가 왜곡되었거나, 실제로 존재하지 않는 인물/사건을 조작 날조한 것이 명백한 경우\n"
         "   - SUSPICIOUS: 완전히 조작되지는 않았으나 다소 과장이 섞여 있거나, 검색 결과로 사실 확인이 어려워 추가 검증이 필요한 경우\n\n"
-        "출력 포맷은 반드시 아래 JSON 구조 한 가지만 제공하세요. 다른 부가설명은 배제하고 중괄호로 시작해 중괄호로 끝나는 문자열이어야 합니다.\n"
+        "출력 포맷은 반드시 아래 JSON 구조 한 가지만 제공하세요. 다른 부가설명(마크다운 코드 블록 등)은 배제하고 중괄호로 시작해 중괄호로 끝나는 순수 JSON 문자열이어야 합니다.\n"
         "{\n"
         '  "verdict": "REAL" | "FAKE" | "SUSPICIOUS",\n'
         '  "reason": "참고 기사와 대조 분석한 팩트 체크 판단 근거 요약 (한글로 상세 작성)",\n'
-        '  "contradiction_score": 0.0 ~ 1.0 (모순되거나 왜곡된 정도의 척도)\n'
+        '  "contradiction_score": 0.0 ~ 1.0 (모순되거나 왜곡된 정도의 척도),\n'
+        '  "claims_breakdown": [\n'
+        '    {\n'
+        '      "claim": "기사에서 식별된 핵심 주장 또는 팩트 요소 (예: 성수대교 남단 진입 램프에 9cm 단차 발생)",\n'
+        '      "truth": "진실" | "거짓" | "판단유보",\n'
+        '      "explanation": "이 주장/사실이 진실 또는 거짓인 이유와 대조한 참고 자료 근거 (상세 서술)"\n'
+        '    }\n'
+        '  ]\n'
         "}"
     )
     
@@ -500,12 +578,18 @@ def fact_check_article_with_sources(target_title, target_content, sources, conte
                 data = resp.json()
                 output = data["candidates"][0]["content"]["parts"][0]["text"].strip()
                 try:
-                    return json.loads(output)
+                    res = json.loads(output)
+                    if "claims_breakdown" not in res:
+                        res["claims_breakdown"] = []
+                    return res
                 except Exception as je:
                     print(f"[-] Gemini JSON 파싱 에러. RAW 응답:\n{output}\n")
                     match = re.search(r'\{.*\}', output, re.DOTALL)
                     if match:
-                        return json.loads(match.group(0))
+                        res = json.loads(match.group(0))
+                        if "claims_breakdown" not in res:
+                            res["claims_breakdown"] = []
+                        return res
             else:
                 print(f"[-] Gemini API 호출 실패 (HTTP {resp.status_code}): {resp.text}")
         except Exception as e:
@@ -522,7 +606,8 @@ def fact_check_article_with_sources(target_title, target_content, sources, conte
         return {
             "verdict": "SUSPICIOUS",
             "reason": reason,
-            "contradiction_score": 0.5
+            "contradiction_score": 0.5,
+            "claims_breakdown": []
         }
 
     # 로컬 Ollama 모델을 활용한 기존 폴백 로직
@@ -549,7 +634,10 @@ def fact_check_article_with_sources(target_title, target_content, sources, conte
                 json_str = output
                 
             try:
-                return json.loads(json_str)
+                res = json.loads(json_str)
+                if "claims_breakdown" not in res:
+                    res["claims_breakdown"] = []
+                return res
             except Exception as je:
                 print(f"[-] JSON 파싱 에러 발생. RAW 응답:\n{output}\n")
                 raise je
@@ -559,7 +647,8 @@ def fact_check_article_with_sources(target_title, target_content, sources, conte
     return {
         "verdict": "SUSPICIOUS",
         "reason": "LLM 분석 도중 기술적 오류가 발생하여 최종 판정을 유보합니다.",
-        "contradiction_score": 0.5
+        "contradiction_score": 0.5,
+        "claims_breakdown": []
     }
 
 def get_trained_nll_model():
@@ -666,6 +755,42 @@ def load_nll_model():
     return lm, threshold
 
 
+def generate_search_query_via_llm(title, content):
+    """
+    SNS나 커뮤니티 게시물처럼 비정형적이고 비격식적인 글에서
+    교차 검증을 위한 최적의 뉴스 검색 쿼리(명사 위주 핵심 키워드)를 LLM을 통해 생성합니다.
+    """
+    if not GEMINI_API_KEY or GEMINI_API_KEY.strip() == "" or GEMINI_API_KEY.strip() == "YOUR_GEMINI_API_KEY":
+        return None
+    
+    prompt = (
+        "아래 비정형 게시글(SNS/커뮤니티)을 분석하여, 이 글에서 주장하는 핵심 사실 관계를 검증하기 위해 포털 뉴스 검색창에 입력할 최적의 검색 쿼리(키워드 2~3개)를 단 한 줄로 생성하십시오.\n"
+        "지침:\n"
+        "1. 불필요한 은어, 조사, 수식어는 배제하고 핵심 사건, 인물, 명사만 추출하세요.\n"
+        "2. 다른 설명 없이 오직 공백으로 구분된 키워드들만 출력하세요.\n"
+        "예: '#박세리 아버지가 결국 고소당했네요 진짜 충격입니다 ㅠㅠ' -> '박세리 아버지 고소'\n\n"
+        f"제목: {title}\n"
+        f"본문 일부: {content[:300]}\n"
+        "검색어:"
+    )
+    
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY.strip()}"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.0, "maxOutputTokens": 20}
+    }
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=10)
+        if resp.status_code == 200:
+            output = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+            # Clean output from punctuation/markdown
+            output = re.sub(r'[^가-힣a-zA-Z0-9\s]', '', output)
+            return " ".join(output.split())
+    except Exception as e:
+        print(f"[-] LLM 검색어 생성 실패: {e}")
+    return None
+
 def check_url_validity(url, nll_model=None, nll_threshold=5.6):
     """
     주어진 URL을 크롤링하여 팩트 체크를 전체 수행하는 핵심 파이프라인 함수
@@ -712,7 +837,8 @@ def check_url_validity(url, nll_model=None, nll_threshold=5.6):
                 "target_url": url,
                 "nll_loss": round(nll_loss, 4),
                 "stage": 1,
-                "sources": []
+                "sources": [],
+                "claims_breakdown": []
             }
         else:
             print("    [!] NLL 점수가 임계값을 초과했습니다. 기사의 문맥 연결이 부자연스러워 2단계 정밀 팩트체크로 이관합니다.")
@@ -724,11 +850,26 @@ def check_url_validity(url, nll_model=None, nll_threshold=5.6):
     print("\n[2] 로컬 텍스트 분석 기반 핵심 검색 키워드 추출 중...")
     # SNS는 '[플랫폼] 유저명:' 접두어를 제외한 본문에서 키워드 추출
     search_base = article.get('search_text') or article['title']
-    keywords = extract_keywords_fast(search_base)
-    if not keywords:
-        search_query = search_base[:15]
-    else:
-        search_query = " ".join(keywords)
+    
+    # SNS 또는 커뮤니티의 경우 비정형 데이터이므로 LLM 기반 검색 쿼리 생성을 먼저 시도합니다.
+    search_query = None
+    is_sns_or_community = bool(sns_label) or any(dom in url for dom in [
+        "dcinside.com", "fmkorea.com", "ruliweb.com", "clien.net", "ppomppu.co.kr", 
+        "instiz.net", "inven.co.kr", "todayhumor.co.kr", "mlbpark.donga.com", 
+        "slrclub.com", "pann.nate.com", "bobaedream.co.kr", "theqoo.net", "instiz"
+    ])
+    
+    if is_sns_or_community:
+        print("    - SNS/커뮤니티 출처 탐지: 더 정밀한 검색을 위해 LLM 기반 검색 쿼리 생성을 시도합니다.")
+        search_query = generate_search_query_via_llm(article['title'], article['content'])
+        
+    if not search_query:
+        keywords = extract_keywords_fast(search_base)
+        if not keywords:
+            search_query = search_base[:15]
+        else:
+            search_query = " ".join(keywords)
+            
     print(f"    - 추출된 검색어: '{search_query}'")
     
     print("\n[3] 실시간 포털 및 웹 검색 교차 검증 정보 수집 중...")
