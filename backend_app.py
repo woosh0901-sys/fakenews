@@ -359,22 +359,19 @@ async def query_check(check_id: int, payload: QueryRequest):
             "4. 반드시 마크다운이나 JSON 기호 없이 일반 평서문 텍스트로만 답변해 주세요."
         )
         
-        from fact_checker_by_url import GEMINI_API_KEY
+        from fact_checker_by_url import GEMINI_API_KEY, call_gemini_api
         
         answer = "LLM 연동이 되어 있지 않아 추가 질문에 대한 분석을 진행할 수 없습니다."
         
         if GEMINI_API_KEY and GEMINI_API_KEY.strip() and GEMINI_API_KEY.strip() != "YOUR_GEMINI_API_KEY":
-            g_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY.strip()}"
-            g_headers = {"Content-Type": "application/json"}
-            g_payload = {
-                "contents": [{"parts": [{"text": prompt}]}]
-            }
-            resp_g = requests.post(g_url, headers=g_headers, json=g_payload, timeout=25)
-            if resp_g.status_code == 200:
-                g_data = resp_g.json()
-                answer = g_data["candidates"][0]["content"]["parts"][0]["text"].strip()
-            else:
-                answer = f"Gemini API 호출에 실패했습니다. (HTTP {resp_g.status_code})"
+            try:
+                output = call_gemini_api(prompt)
+                if output:
+                    answer = output
+                else:
+                    answer = "Gemini API 호출에 실패했습니다. 잠시 후 다시 시도해 주세요."
+            except Exception as e:
+                answer = f"Gemini API 호출 중 오류가 발생했습니다: {str(e)}"
         else:
             answer = "서버에 GEMINI_API_KEY 환경 변수가 설정되지 않아 실시간 AI 답변 기능을 제공할 수 없습니다."
             
@@ -423,22 +420,19 @@ async def chat_general(payload: QueryRequest):
             "4. 마크다운 형식(글머리 기호, 굵은 글씨 등)을 활용해 가독성 있게 정리해 주세요."
         )
         
-        from fact_checker_by_url import GEMINI_API_KEY
+        from fact_checker_by_url import GEMINI_API_KEY, call_gemini_api
         
         answer = "LLM 연동이 되어 있지 않아 팩트체크 대화 분석을 진행할 수 없습니다."
         
         if GEMINI_API_KEY and GEMINI_API_KEY.strip() and GEMINI_API_KEY.strip() != "YOUR_GEMINI_API_KEY":
-            g_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY.strip()}"
-            g_headers = {"Content-Type": "application/json"}
-            g_payload = {
-                "contents": [{"parts": [{"text": prompt}]}]
-            }
-            resp_g = requests.post(g_url, headers=g_headers, json=g_payload, timeout=25)
-            if resp_g.status_code == 200:
-                g_data = resp_g.json()
-                answer = g_data["candidates"][0]["content"]["parts"][0]["text"].strip()
-            else:
-                answer = f"Gemini API 호출에 실패했습니다. (HTTP {resp_g.status_code})"
+            try:
+                output = call_gemini_api(prompt)
+                if output:
+                    answer = output
+                else:
+                    answer = "Gemini API 호출에 실패했습니다. 잠시 후 다시 시도해 주세요."
+            except Exception as e:
+                answer = f"Gemini API 호출 중 오류가 발생했습니다: {str(e)}"
         else:
             answer = "서버에 GEMINI_API_KEY 환경 변수가 설정되지 않아 실시간 AI 답변 기능을 제공할 수 없습니다."
             

@@ -108,31 +108,59 @@ def fetch_hybrid_news(query, display_count=3):
     네이버 뉴스 검색 API와 DuckDuckGo 실시간 웹 검색 결과를 모두 수집하고 병합하여
     네이버와 구글 검색을 완벽히 모방하는 하이브리드 대조 결과를 만듭니다.
     """
-    # 1. 네이버 뉴스 검색 시도
-    naver_sources = fetch_naver_news(NAVER_CLIENT_ID, NAVER_CLIENT_SECRET, query, display_count=display_count)
-    print(f"    - 네이버 뉴스 검색 결과: {len(naver_sources)}개 수집됨.")
+    from concurrent.futures import ThreadPoolExecutor
     
-    # 2. DuckDuckGo 실시간 웹 검색 실행
-    # 만약 쿼리에 한국어가 포함되어 있다면, 영어 번역 검색도 병행하여 해외 원본 기사를 수집합니다.
-    has_korean = bool(re.search(r'[가-힣]', query))
+    naver_sources = []
     web_sources = []
     
-    if has_korean:
-        # 한국어 검색 실행
-        web_sources_ko = fetch_duckduckgo_search(query, max_results=display_count)
-        web_sources.extend(web_sources_ko)
-        
-        # 영어 번역 검색 실행 (해외 기사 검증용)
-        eng_query = translate_ko_to_en(query)
-        if eng_query and eng_query != query:
-            print(f"    - 해외 기사 교차 대조를 위해 영어 번역 쿼리 실행: '{eng_query}'")
-            web_sources_en = fetch_duckduckgo_search(eng_query, max_results=display_count)
-            web_sources.extend(web_sources_en)
-    else:
-        # 영어 쿼리인 경우 바로 실행
-        web_sources_en = fetch_duckduckgo_search(query, max_results=display_count)
-        web_sources.extend(web_sources_en)
-        
+    has_korean = bool(re.search(r'[가-힣]', query))
+    
+    def get_naver():
+        nonlocal naver_sources
+        try:
+            naver_sources = fetch_naver_news(NAVER_CLIENT_ID, NAVER_CLIENT_SECRET, query, display_count=display_count)
+            print(f"    - 네이버 뉴스 검색 결과: {len(naver_sources)}개 수집됨.")
+        except Exception as e:
+            print(f"    [-] 네이버 뉴스 검색 실패: {e}")
+
+    def get_ddg_ko():
+        nonlocal web_sources
+        if has_korean:
+            try:
+                res = fetch_duckduckgo_search(query, max_results=display_count)
+                web_sources.extend(res)
+                print(f"    - DuckDuckGo 한글 검색 결과: {len(res)}개 수집됨.")
+            except Exception as e:
+                print(f"    [-] DuckDuckGo 한글 검색 실패: {e}")
+
+    def get_ddg_en():
+        nonlocal web_sources
+        try:
+            if has_korean:
+                eng_query = translate_ko_to_en(query)
+                if eng_query and eng_query != query:
+                    print(f"    - 해외 기사 교차 대조를 위해 영어 번역 쿼리 실행: '{eng_query}'")
+                    res = fetch_duckduckgo_search(eng_query, max_results=display_count)
+                    web_sources.extend(res)
+                    print(f"    - DuckDuckGo 영문 검색 결과: {len(res)}개 수집됨.")
+            else:
+                res = fetch_duckduckgo_search(query, max_results=display_count)
+                web_sources.extend(res)
+                print(f"    - DuckDuckGo 영문 검색 결과: {len(res)}개 수집됨.")
+        except Exception as e:
+            print(f"    [-] DuckDuckGo 영문 검색 실패: {e}")
+
+    # 병렬로 실행하여 검색 지연 단축
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = [
+            executor.submit(get_naver),
+            executor.submit(get_ddg_ko),
+            executor.submit(get_ddg_en)
+        ]
+        # 모든 스레드가 완료될 때까지 대기
+        for future in futures:
+            future.result()
+            
     # 3. 중복 제거하며 병합 (네이버 결과 우선순위, 해외 원본 기사 우선순위 부여)
     merged = []
     existing_links = set()
@@ -161,7 +189,7 @@ def fetch_hybrid_news(query, display_count=3):
     print(f"    - 하이브리드 검색 병합 완료: 통합 {len(merged)}개 소스 확보.")
     return merged[:display_count]
 
-def scrape_url_content(url):
+def scrape_url_content(url, timeout=15):
     """
     주어진 URL 웹페이지를 크롤링하여 기사 제목과 본문을 추출합니다.
     """
@@ -169,7 +197,7 @@ def scrape_url_content(url):
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
     try:
-        resp = requests.get(url, headers=headers, timeout=15)
+        resp = requests.get(url, headers=headers, timeout=timeout)
         if resp.status_code != 200:
             print(f"[-] 웹페이지 접속 실패 (HTTP {resp.status_code}): {url}")
             return None
@@ -521,6 +549,75 @@ def extract_keywords_fast(title):
     # 핵심 명사 최대 10개 선택 (이벤트 핵심 액션 단어 유실 방지)
     return filtered[:10]
 
+def call_gemini_api(prompt, response_mime_type=None, temperature=None, max_output_tokens=None):
+    """
+    Gemini API를 호출하는 공통 함수.
+    gemini-2.0-flash를 우선 시도하고 실패하면 gemini-1.5-flash로 폴백하며,
+    최대 3회 재시도(지수 백오프 적용)를 지원하여 일시적 서버 오류나 할당량 초과에 대응합니다.
+    """
+    import time
+    if not GEMINI_API_KEY or GEMINI_API_KEY.strip() == "" or GEMINI_API_KEY.strip() == "YOUR_GEMINI_API_KEY":
+        return None
+    
+    # 사용할 모델 목록 (우선순위 순서)
+    models = ["gemini-2.0-flash", "gemini-1.5-flash"]
+    
+    for model in models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY.strip()}"
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        generation_config = {}
+        if response_mime_type:
+            generation_config["responseMimeType"] = response_mime_type
+        if temperature is not None:
+            generation_config["temperature"] = temperature
+        if max_output_tokens is not None:
+            generation_config["maxOutputTokens"] = max_output_tokens
+            
+        payload = {
+            "contents": [{
+                "parts": [{
+                    "text": prompt
+                }]
+            }]
+        }
+        if generation_config:
+            payload["generationConfig"] = generation_config
+            
+        max_retries = 3
+        backoff_factor = 1.5
+        
+        for attempt in range(max_retries):
+            try:
+                print(f"[★] Gemini API 호출 시도 ({model}, 시도 {attempt + 1}/{max_retries})...")
+                resp = requests.post(url, headers=headers, json=payload, timeout=25)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    try:
+                        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                    except (KeyError, IndexError) as pe:
+                        print(f"[-] Gemini 응답 데이터 구조 오류: {pe}")
+                        break
+                elif resp.status_code == 429:
+                    sleep_time = (backoff_factor ** attempt) * 2
+                    print(f"[-] Gemini API Rate Limit (429) 감지. {sleep_time:.1f}초 후 재시도합니다...")
+                    time.sleep(sleep_time)
+                elif resp.status_code in [500, 503, 504]:
+                    sleep_time = (backoff_factor ** attempt) * 1.5
+                    print(f"[-] Gemini API 서버 오류 ({resp.status_code}). {sleep_time:.1f}초 후 재시도합니다...")
+                    time.sleep(sleep_time)
+                else:
+                    print(f"[-] Gemini API 호출 에러 (HTTP {resp.status_code}): {resp.text}")
+                    break
+            except requests.exceptions.RequestException as e:
+                sleep_time = (backoff_factor ** attempt) * 1.5
+                print(f"[-] Gemini API 통신 오류 ({e}). {sleep_time:.1f}초 후 재시도합니다...")
+                time.sleep(sleep_time)
+                
+    return None
+
 def fact_check_article_with_sources(target_title, target_content, sources, content_label="기사"):
     """
     검증 대상 기사(또는 SNS 게시물)와, 수집된 진짜 뉴스 참고 자료들을 상호 대조하여 가짜뉴스 판정 결과를 내립니다.
@@ -533,20 +630,37 @@ def fact_check_article_with_sources(target_title, target_content, sources, conte
             "claims_breakdown": []
         }
 
+    # 실시간 처리 속도를 올리기 위해 기사 본문을 병렬로 크롤링합니다. (최대 3개)
+    ref_contents = [None] * len(sources)
+    
+    def crawl_source(index, link):
+        try:
+            print(f"      - [참고 자료 {index+1}] 본문 크롤링 진행: {link}")
+            # 참고 자료 크롤링의 경우 타임아웃을 5초로 타이트하게 잡아 지연을 최소화합니다.
+            ref_art = scrape_url_content(link, timeout=5)
+            if ref_art and ref_art['content']:
+                return ref_art['content'][:1200]
+        except Exception as e:
+            print(f"      - [참고 자료 {index+1}] 크롤링 실패: {e}")
+        return ""
+
+    links_to_crawl = [(i, s['link']) for i, s in enumerate(sources) if i < 3]
+    
+    if links_to_crawl:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            future_to_index = {executor.submit(crawl_source, i, link): i for i, link in links_to_crawl}
+            for future in future_to_index:
+                idx = future_to_index[future]
+                try:
+                    ref_contents[idx] = future.result()
+                except Exception as e:
+                    print(f"      - [참고 자료 {idx+1}] 스레드 실행 오류: {e}")
+                    ref_contents[idx] = ""
+
     sources_text = ""
     for i, s in enumerate(sources):
-        ref_body = ""
-        # Crawl actual body only for the top 3 sources to optimize performance and prevent API delays
-        if i < 3:
-            try:
-                print(f"      - [참고 자료 {i+1}] 본문 크롤링 진행: {s['link']}")
-                ref_art = scrape_url_content(s['link'])
-                if ref_art and ref_art['content']:
-                    # Limit to 1200 characters to prevent context bloat
-                    ref_body = ref_art['content'][:1200]
-            except Exception as e:
-                print(f"      - [참고 자료 {i+1}] 크롤링 실패: {e}")
-                
+        ref_body = ref_contents[i] if i < len(ref_contents) and ref_contents[i] else ""
         desc = ref_body if ref_body else s['description']
         sources_text += f"[참고 뉴스 {i+1}]\n제목: {s['title']}\n요약/본문 내용: {desc}\n출처 링크: {s['link']}\n\n"
 
@@ -587,32 +701,17 @@ def fact_check_article_with_sources(target_title, target_content, sources, conte
     )
     
     # 클라우드 Gemini API 연동 설정이 있는 경우 우선 사용 (초고속 판정)
+    gemini_result = None
     if GEMINI_API_KEY and GEMINI_API_KEY.strip() and GEMINI_API_KEY.strip() != "YOUR_GEMINI_API_KEY":
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY.strip()}"
-        headers = {
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "contents": [{
-                "parts": [{
-                    "text": prompt
-                }]
-            }],
-            "generationConfig": {
-                "responseMimeType": "application/json"
-            }
-        }
         try:
             print("\n[★] 클라우드 Gemini API를 호출하여 정밀 팩트체크 분석을 수행합니다...")
-            resp = requests.post(url, headers=headers, json=payload, timeout=20)
-            if resp.status_code == 200:
-                data = resp.json()
-                output = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            output = call_gemini_api(prompt, response_mime_type="application/json")
+            if output:
                 try:
                     res = json.loads(output)
                     if "claims_breakdown" not in res:
                         res["claims_breakdown"] = []
-                    return res
+                    gemini_result = res
                 except Exception as je:
                     print(f"[-] Gemini JSON 파싱 에러. RAW 응답:\n{output}\n")
                     match = re.search(r'\{.*\}', output, re.DOTALL)
@@ -620,18 +719,19 @@ def fact_check_article_with_sources(target_title, target_content, sources, conte
                         res = json.loads(match.group(0))
                         if "claims_breakdown" not in res:
                             res["claims_breakdown"] = []
-                        return res
-            else:
-                print(f"[-] Gemini API 호출 실패 (HTTP {resp.status_code}): {resp.text}")
+                        gemini_result = res
         except Exception as e:
-            print(f"[-] Gemini API 통신 중 에러 발생: {e}")
+            print(f"[-] Gemini API 분석 중 예외 발생: {e}")
             
-        print("[-] Gemini API 연동 실패로 인해 로컬 Ollama 모델로 폴백(Fallback)합니다.")
+    if gemini_result is not None:
+        return gemini_result
+
+    print("[-] Gemini API 연동 실패로 인해 로컬 Ollama 모델로 폴백(Fallback)하거나 즉시 유보합니다.")
 
     # 서버리스 환경에서는 localhost Ollama가 존재하지 않으므로 즉시 판정을 유보합니다.
     if IS_SERVERLESS:
         if not (GEMINI_API_KEY and GEMINI_API_KEY.strip() and GEMINI_API_KEY.strip() != "YOUR_GEMINI_API_KEY"):
-            reason = "서버에 GEMINI_API_KEY 환경 변수가 설정되지 않아 2단계 LLM 정밀 분석을 수행할 수 없습니다. 배포 설정에서 환경 변수를 등록해 주세요."
+            reason = "서버에 GEMINI_API_KEY 환경 변수가 설정되지 않아 2단계 LLM 정밀 분석을 수행할 수 없습니다. 배포 설정에서 환경 변수가 등록해 주세요."
         else:
             reason = "Gemini API 호출에 실패하여 최종 판정을 유보합니다. 잠시 후 다시 시도해 주세요."
         return {
@@ -805,16 +905,9 @@ def generate_search_query_via_llm(title, content):
         "검색어:"
     )
     
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY.strip()}"
-    headers = {"Content-Type": "application/json"}
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.0, "maxOutputTokens": 20}
-    }
     try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=10)
-        if resp.status_code == 200:
-            output = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        output = call_gemini_api(prompt, temperature=0.0, max_output_tokens=20)
+        if output:
             # Clean output from punctuation/markdown
             output = re.sub(r'[^가-힣a-zA-Z0-9\s]', '', output)
             return " ".join(output.split())
