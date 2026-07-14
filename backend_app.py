@@ -61,6 +61,25 @@ async def debug_env():
         "IS_VERCEL": bool(os.environ.get("VERCEL")),
     }
 
+@app.get("/api/debug/gemini")
+async def debug_gemini():
+    """Temporary debug endpoint to test actual Gemini API call."""
+    import requests as req
+    from fact_checker_by_url import GEMINI_API_KEY as gkey
+    if not gkey:
+        return {"error": "GEMINI_API_KEY is empty"}
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gkey.strip()}"
+        payload = {"contents": [{"parts": [{"text": "Say hello in Korean, one sentence only."}]}]}
+        resp = req.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=15)
+        return {
+            "status_code": resp.status_code,
+            "response_body": resp.json() if resp.status_code == 200 else resp.text[:500],
+            "success": resp.status_code == 200
+        }
+    except Exception as e:
+        return {"error": str(e), "type": type(e).__name__}
+
 # Helper function to get Supabase API headers
 def get_supabase_headers():
     return {
