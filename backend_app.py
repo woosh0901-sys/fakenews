@@ -49,6 +49,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/api/debug/env")
+async def debug_env():
+    """Temporary debug endpoint to verify environment variables are loaded."""
+    from fact_checker_by_url import GEMINI_API_KEY as gkey
+    return {
+        "GEMINI_API_KEY": f"{gkey[:6]}...{gkey[-4:]}" if gkey and len(gkey) > 10 else f"EMPTY_OR_SHORT(len={len(gkey) if gkey else 0})",
+        "NAVER_CLIENT_ID": bool(NAVER_CLIENT_ID if 'NAVER_CLIENT_ID' in dir() else os.environ.get("NAVER_CLIENT_ID")),
+        "SUPABASE_URL": SUPABASE_URL[:30] + "..." if SUPABASE_URL and len(SUPABASE_URL) > 30 else str(SUPABASE_URL),
+        "SUPABASE_ENABLED": SUPABASE_ENABLED,
+        "IS_VERCEL": bool(os.environ.get("VERCEL")),
+    }
+
 # Helper function to get Supabase API headers
 def get_supabase_headers():
     return {
