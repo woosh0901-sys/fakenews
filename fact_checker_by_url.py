@@ -555,9 +555,9 @@ def call_gemini_api(prompt, response_mime_type=None, temperature=None, max_outpu
         if generation_config:
             payload["generationConfig"] = generation_config
             
-        max_retries = 1 if IS_SERVERLESS else 3
-        backoff_factor = 1.5
-        api_timeout = 5.0 if IS_SERVERLESS else 20.0
+        max_retries = 2 if IS_SERVERLESS else 3
+        backoff_factor = 0.5 if IS_SERVERLESS else 1.5
+        api_timeout = 15.0 if IS_SERVERLESS else 20.0
         
         for attempt in range(max_retries):
             try:
