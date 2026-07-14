@@ -46,7 +46,7 @@ def fetch_duckduckgo_search(query, max_results=3):
     ]
     
     try:
-        resp = requests.post(url, headers=headers, data=data, timeout=4)
+        resp = requests.post(url, headers=headers, data=data, timeout=3)
         if resp.status_code == 200:
             soup = BeautifulSoup(resp.text, 'html.parser')
             # DuckDuckGo HTML 검색 결과 파싱
@@ -133,7 +133,7 @@ def fetch_hybrid_news(query, display_count=3):
     print(f"    - 하이브리드 검색 병합 완료: 통합 {len(merged)}개 소스 확보.")
     return merged[:display_count]
 
-def scrape_url_content(url, timeout=15):
+def scrape_url_content(url, timeout=5):
     """
     주어진 URL 웹페이지를 크롤링하여 기사 제목과 본문을 추출합니다.
     """
@@ -271,11 +271,20 @@ def scrape_url_content(url, timeout=15):
         if found_links:
             print(f"    [+] 본문 내 뉴스 원본 링크 감지: {found_links}")
             crawled_contents = []
-            for link in found_links[:3]:  # 최대 3개 크롤링
-                if link != url:  # 무한 루프 방지
-                    print(f"    - 원본 뉴스 링크 추가 크롤링 진행: {link}")
-                    original_article = scrape_url_content(link)
-                    if original_article and original_article['content']:
+            links_to_crawl = [link for link in found_links[:3] if link != url]
+            if links_to_crawl:
+                from concurrent.futures import ThreadPoolExecutor
+                def crawl_link(l):
+                    try:
+                        return scrape_url_content(l, timeout=3)
+                    except Exception:
+                        return None
+                
+                with ThreadPoolExecutor(max_workers=3) as executor:
+                    crawled_results = list(executor.map(crawl_link, links_to_crawl))
+                
+                for original_article in crawled_results:
+                    if original_article and original_article.get('content'):
                         crawled_contents.append(f"[연동 뉴스 원본: {original_article['title']}]\n{original_article['content']}")
             
             if crawled_contents:
@@ -313,7 +322,7 @@ def scrape_instagram_post(url):
         "User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"
     }
     try:
-        resp = requests.get(canonical_url, headers=headers, timeout=15)
+        resp = requests.get(canonical_url, headers=headers, timeout=5)
         if resp.status_code != 200:
             print(f"[-] 인스타그램 게시물 접근 실패 (HTTP {resp.status_code}): {canonical_url}")
             return None
@@ -419,7 +428,7 @@ def scrape_twitter_post(url):
         resp = requests.get(
             "https://publish.twitter.com/oembed",
             params={"url": canonical_url, "omit_script": "true", "lang": "ko"},
-            timeout=15
+            timeout=5
         )
         if resp.status_code != 200:
             print(f"[-] 트위터 oEmbed 조회 실패 (HTTP {resp.status_code}). 삭제되었거나 비공개 계정의 게시물일 수 있습니다.")
@@ -546,13 +555,14 @@ def call_gemini_api(prompt, response_mime_type=None, temperature=None, max_outpu
         if generation_config:
             payload["generationConfig"] = generation_config
             
-        max_retries = 3
+        max_retries = 1 if IS_SERVERLESS else 3
         backoff_factor = 1.5
+        api_timeout = 5.0 if IS_SERVERLESS else 20.0
         
         for attempt in range(max_retries):
             try:
                 print(f"[★] Gemini API 호출 시도 ({model}, 시도 {attempt + 1}/{max_retries})...")
-                resp = requests.post(url, headers=headers, json=payload, timeout=25)
+                resp = requests.post(url, headers=headers, json=payload, timeout=api_timeout)
                 if resp.status_code == 200:
                     data = resp.json()
                     try:
@@ -596,8 +606,8 @@ def fact_check_article_with_sources(target_title, target_content, sources, conte
     def crawl_source(index, link):
         try:
             print(f"      - [참고 자료 {index+1}] 본문 크롤링 진행: {link}")
-            # 참고 자료 크롤링의 경우 타임아웃을 5초로 타이트하게 잡아 지연을 최소화합니다.
-            ref_art = scrape_url_content(link, timeout=5)
+            # 참고 자료 크롤링의 경우 타임아웃을 타이트하게 잡아 지연을 최소화합니다.
+            ref_art = scrape_url_content(link, timeout=3.5 if IS_SERVERLESS else 5.0)
             if ref_art and ref_art['content']:
                 return ref_art['content'][:1200]
         except Exception as e:

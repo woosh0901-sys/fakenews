@@ -39,7 +39,7 @@ def fetch_naver_news(client_id, client_secret, query, display_count=5):
     }
     
     try:
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=3.0)
         if response.status_code == 200:
             data = response.json()
             items = data.get("items", [])
