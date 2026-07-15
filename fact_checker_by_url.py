@@ -529,7 +529,7 @@ def call_gemini_api(prompt, response_mime_type=None, temperature=None, max_outpu
         return None
     
     # 사용할 모델 목록 (우선순위 순서)
-    models = ["gemini-2.5-flash", "gemini-2.0-flash-lite"]
+    models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"]
     
     for model in models:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY.strip()}"
@@ -574,7 +574,11 @@ def call_gemini_api(prompt, response_mime_type=None, temperature=None, max_outpu
                     sleep_time = (backoff_factor ** attempt) * 2
                     print(f"[-] Gemini API Rate Limit (429) 감지. {sleep_time:.1f}초 후 재시도합니다...")
                     time.sleep(sleep_time)
-                elif resp.status_code in [500, 503, 504]:
+                elif resp.status_code == 503:
+                    # 503 = 모델 과부하 → 같은 모델 재시도해봐야 의미 없으므로 즉시 다음 폴백 모델로
+                    print(f"[-] Gemini API 모델 과부하 (503: UNAVAILABLE). 즉시 다음 폴백 모델로 전환합니다...")
+                    break
+                elif resp.status_code in [500, 504]:
                     sleep_time = (backoff_factor ** attempt) * 1.5
                     print(f"[-] Gemini API 서버 오류 ({resp.status_code}). {sleep_time:.1f}초 후 재시도합니다...")
                     time.sleep(sleep_time)
