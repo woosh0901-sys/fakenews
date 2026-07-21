@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import Landing from "./Landing";
 import { 
@@ -31,6 +31,9 @@ import {
 const API_BASE_URL = "/api";
 
 export default function App() {
+  // Timer references for memory cleanup
+  const activeTimersRef = useRef([]);
+
   // Theme state
   const [darkMode, setDarkMode] = useState(() => {
     return localStorage.getItem("theme") === "dark" || 
@@ -56,7 +59,6 @@ export default function App() {
     real_count: 0,
     fake_count: 0,
     suspicious_count: 0,
-    avg_nll: 0,
     avg_contradiction_score: 0
   });
 
@@ -69,6 +71,19 @@ export default function App() {
   const [commentContent, setCommentContent] = useState("");
   const [chatInput, setChatInput] = useState("");
   const [loadingChat, setLoadingChat] = useState(false);
+
+  // General Chatbot States
+  const [activeTab, setActiveTab] = useState("dashboard");
+  const [generalChatHistory, setGeneralChatHistory] = useState([
+    {
+      query: null,
+      answer: "안녕하세요! 실시간 웹 검색과 RAG-LLM 기반의 AI 팩트체커 어시스턴트입니다. 궁금한 소문, 뉴스, 루머에 대해 질문하시면 실시간으로 관련 사실을 추적하고 검증 결과를 알려드립니다. (예: '성수대교 단차 9cm 사실인가요?')",
+      sources: [],
+      isSystem: true
+    }
+  ]);
+  const [generalChatInput, setGeneralChatInput] = useState("");
+  const [loadingGeneralChat, setLoadingGeneralChat] = useState(false);
   
   // Persistent anonymous user identity
   const [userToken, setUserToken] = useState(() => {
@@ -158,26 +173,39 @@ export default function App() {
     loadItemDetails();
   }, [selectedItem]);
 
+  // Cleanup all active timers on unmount
+  useEffect(() => {
+    return () => {
+      activeTimersRef.current.forEach(clearTimeout);
+      activeTimersRef.current = [];
+    };
+  }, []);
+
   // 검증 실행 (대시보드 폼과 랜딩 페이지 양쪽에서 사용)
   const runCheck = async (targetUrl) => {
     if (loading || !targetUrl.trim()) return;
+
+    // Clear any existing timers first
+    activeTimersRef.current.forEach(clearTimeout);
+    activeTimersRef.current = [];
 
     setLoading(true);
     setActiveStep(1);
     
     // Simulate steps visually to guide the user through the pipeline
-    const timers = [];
-    timers.push(setTimeout(() => setActiveStep(2), 1200));
-    timers.push(setTimeout(() => setActiveStep(3), 2400));
-    timers.push(setTimeout(() => setActiveStep(4), 3600));
+    const t2 = setTimeout(() => setActiveStep(2), 1500);
+    const t3 = setTimeout(() => setActiveStep(3), 3000);
+    
+    activeTimersRef.current = [t2, t3];
 
     try {
-      const res = await axios.post(`${API_BASE_URL}/check`, { url: targetUrl });
-      timers.forEach(clearTimeout);
-      setActiveStep(5);
+      const res = await axios.post(`${API_BASE_URL}/check`, { url: targetUrl }, { timeout: 90000 });
+      activeTimersRef.current.forEach(clearTimeout);
+      activeTimersRef.current = [];
+      setActiveStep(4);
       
       // Delay slightly so user sees step 5 (success) before update
-      setTimeout(async () => {
+      const tSuccess = setTimeout(async () => {
         setUrlInput("");
         setLoading(false);
         await loadData();
@@ -189,8 +217,11 @@ export default function App() {
         });
       }, 500);
       
+      activeTimersRef.current.push(tSuccess);
+      
     } catch (err) {
-      timers.forEach(clearTimeout);
+      activeTimersRef.current.forEach(clearTimeout);
+      activeTimersRef.current = [];
       setLoading(false);
       const errMsg = err.response?.data?.detail || "탐지 분석 중 기술적 에러가 발생했습니다.";
       alert(errMsg);
@@ -203,43 +234,57 @@ export default function App() {
     runCheck(urlInput);
   };
 
-  // 랜딩에서 검증하기 제출 → 분석 로딩 화면을 보여준 뒤 완료되면 대시보드로 전환
-  const handleLandingSubmit = async (url) => {
-    if (loading || !url.trim()) return;
+  // 랜딩 페이지에서 검증하기 제출 → URL인 경우 분석 로딩 화면을 거쳐 대시보드로 전환하고, 일반 텍스트인 경우 AI 팩트체크 어시스턴트로 이동
+  const handleLandingSubmit = async (inputVal) => {
+    const trimmed = inputVal.trim();
+    if (loading || !trimmed) return;
 
-    setUrlInput(url);
-    setPreview(null);
-    setAnalysisDone(false);
-    setAnalyzing(true);
-    setLoading(true);
+    // URL 판별: http/https로 시작하거나, 공백이 없고 도메인 패턴을 포함한 경우
+    const isUrl = trimmed.startsWith("http://") || 
+                  trimmed.startsWith("https://") || 
+                  (trimmed.split('/')[0].includes('.') && !trimmed.includes(' '));
 
-    // 로딩 화면에 띄울 기사 본문 미리보기 (실패해도 분석은 계속 진행)
-    axios
-      .post(`${API_BASE_URL}/preview`, { url })
-      .then((res) => setPreview(res.data))
-      .catch(() => {});
+    if (isUrl) {
+      setUrlInput(trimmed);
+      setPreview(null);
+      setAnalysisDone(false);
+      setAnalyzing(true);
+      setLoading(true);
 
-    try {
-      const res = await axios.post(`${API_BASE_URL}/check`, { url });
-      await loadData();
+      // 로딩 화면에 띄울 기사 본문 미리보기 (실패해도 분석은 계속 진행)
+      axios
+        .post(`${API_BASE_URL}/preview`, { url: trimmed })
+        .then((res) => setPreview(res.data))
+        .catch(() => {});
 
-      // 완료 문구로 바뀐 것을 잠깐 보여준 뒤 대시보드로 넘어간다
-      setAnalysisDone(true);
-      setTimeout(() => {
-        setSelectedItem({
-          ...res.data,
-          title: res.data.title ?? res.data.target_title,
-          url: res.data.url ?? res.data.target_url,
-        });
-        setUrlInput("");
+      try {
+        const res = await axios.post(`${API_BASE_URL}/check`, { url: trimmed });
+        await loadData();
+
+        // 완료 문구로 바뀐 것을 잠깐 보여준 뒤 대시보드로 넘어간다
+        setAnalysisDone(true);
+        setTimeout(() => {
+          setSelectedItem({
+            ...res.data,
+            title: res.data.title ?? res.data.target_title,
+            url: res.data.url ?? res.data.target_url,
+          });
+          setUrlInput("");
+          setAnalyzing(false);
+          setLoading(false);
+          setView("dashboard");
+          setActiveTab("dashboard");
+        }, 1000);
+      } catch (err) {
         setAnalyzing(false);
         setLoading(false);
-        setView("dashboard");
-      }, 1000);
-    } catch (err) {
-      setAnalyzing(false);
-      setLoading(false);
-      alert(err.response?.data?.detail || "탐지 분석 중 기술적 에러가 발생했습니다.");
+        alert(err.response?.data?.detail || "탐지 분석 중 기술적 에러가 발생했습니다.");
+      }
+    } else {
+      setActiveTab("assistant");
+      setView("dashboard");
+      setSelectedItem(null);
+      handleGeneralChatSubmit(null, trimmed);
     }
   };
 
@@ -373,6 +418,36 @@ export default function App() {
     }
   };
 
+  const handleGeneralChatSubmit = async (e, customQuery = null) => {
+    if (e) e.preventDefault();
+    const query = (customQuery || generalChatInput).trim();
+    if (!query || loadingGeneralChat) return;
+
+    setGeneralChatInput("");
+    setLoadingGeneralChat(true);
+
+    const tempChat = [...generalChatHistory, { query, answer: null, sources: [], loading: true }];
+    setGeneralChatHistory(tempChat);
+
+    try {
+      const res = await axios.post(`${API_BASE_URL}/chat`, { query });
+      setGeneralChatHistory(prev => prev.map(item => 
+        item.query === query && item.loading 
+          ? { query, answer: res.data.answer, sources: res.data.sources, loading: false } 
+          : item
+      ));
+    } catch (err) {
+      const errMsg = err.response?.data?.detail || err.message || "답변을 불러오지 못했습니다.";
+      setGeneralChatHistory(prev => prev.map(item => 
+        item.query === query && item.loading 
+          ? { query, answer: `분석 중 에러가 발생했습니다: ${errMsg}`, sources: [], loading: false } 
+          : item
+      ));
+    } finally {
+      setLoadingGeneralChat(false);
+    }
+  };
+
   // Badge helpers
   const getVerdictBadge = (verdict) => {
     switch (verdict) {
@@ -404,9 +479,8 @@ export default function App() {
   // Loader steps definition
   const loaderSteps = [
     { label: "1. 본문 수집", desc: "웹페이지 크롤링 및 전처리" },
-    { label: "2. 문맥 분석", desc: "NLL 언어 모델 무결성 검증" },
-    { label: "3. 교차 검색", desc: "포털 API & 구글 웹 실시간 추적" },
-    { label: "4. 사실 검증", desc: "Gemini 클라우드 사실관계 판정" }
+    { label: "2. 교차 검색", desc: "포털 API & 구글 웹 실시간 추적" },
+    { label: "3. 사실 검증", desc: "Gemini 클라우드 사실관계 판정" }
   ];
 
   // 첫 화면: 랜딩 페이지
@@ -448,6 +522,35 @@ export default function App() {
               </h1>
               <p className="text-[10px] text-neutral-400 font-semibold tracking-wider uppercase mt-0.5">Hybrid Fact-Checker</p>
             </div>
+          </div>
+          
+          {/* Navigation Menu */}
+          <div className="space-y-1">
+            <button
+              onClick={() => setActiveTab("dashboard")}
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-xs font-bold transition-all ${
+                activeTab === "dashboard"
+                  ? "bg-brand-500 text-white shadow-md shadow-brand-500/15"
+                  : "text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+              }`}
+            >
+              <Database size={14} />
+              신뢰도 대시보드
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab("assistant");
+                setSelectedItem(null); // Clear selected item diagnostic panel when chatting
+              }}
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-xs font-bold transition-all ${
+                activeTab === "assistant"
+                  ? "bg-brand-500 text-white shadow-md shadow-brand-500/15"
+                  : "text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+              }`}
+            >
+              <MessageSquare size={14} />
+              AI 팩트체크 어시스턴트
+            </button>
           </div>
 
           {/* Stats Section */}
@@ -504,10 +607,7 @@ export default function App() {
                   style={{ width: `${stats.avg_contradiction_score * 100}%` }}
                 />
               </div>
-              <div className="flex justify-between items-center text-xs pt-1">
-                <span className="text-neutral-500 dark:text-neutral-400 font-medium">평균 NLL 손실</span>
-                <span className="font-mono font-bold text-neutral-950 dark:text-neutral-50">{stats.avg_nll.toFixed(2)}</span>
-              </div>
+              {/* Avg NLL stats removed */}
             </div>
 
           </div>
@@ -553,7 +653,9 @@ export default function App() {
         {/* Content Wrapper */}
         <div className="flex-1 flex flex-col xl:flex-row overflow-x-hidden min-h-0">
           
-          {/* Dashboard Body (Left/Center) */}
+          {activeTab === "dashboard" ? (
+            <>
+              {/* Dashboard Body (Left/Center) */}
           <div className={`flex-1 p-6 space-y-6 overflow-y-auto max-w-full ${selectedItem ? "xl:w-2/3" : "w-full"} transition-all duration-300`}>
             
             {/* Search/URL Input Box - Sleek Google-Search style */}
@@ -733,16 +835,14 @@ export default function App() {
                     <tr>
                       <th className="p-4 font-bold text-xs uppercase tracking-wider">판정 결과</th>
                       <th className="p-4 font-bold text-xs uppercase tracking-wider">기사 제목 / 주소</th>
-                      <th className="p-4 font-bold text-xs uppercase tracking-wider text-center">검사 단계</th>
                       <th className="p-4 font-bold text-xs uppercase tracking-wider text-center">모순 점수</th>
-                      <th className="p-4 font-bold text-xs uppercase tracking-wider text-center">NLL 손실</th>
                       <th className="p-4 font-bold text-xs uppercase tracking-wider text-right">삭제</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800/60">
                     {history.length === 0 ? (
                       <tr>
-                        <td colSpan="6" className="p-12 text-center text-neutral-500 dark:text-neutral-400 font-medium">
+                        <td colSpan="4" className="p-12 text-center text-neutral-500 dark:text-neutral-400 font-medium">
                           검증 기록이 존재하지 않습니다. 뉴스 링크를 입력하여 신뢰도를 판정해 보세요.
                         </td>
                       </tr>
@@ -762,24 +862,12 @@ export default function App() {
                               <span className="block text-neutral-950 dark:text-neutral-50 font-bold leading-tight truncate">{item.title}</span>
                               <span className="text-xs text-neutral-400 font-medium truncate block mt-0.5 max-w-xs md:max-w-md">{item.url}</span>
                             </td>
-                            <td className="p-4 text-center">
-                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                                item.stage === 1 
-                                  ? "bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400"
-                                  : "bg-info-50 dark:bg-info-950/40 text-info-700 dark:text-info-400"
-                              }`}>
-                                {item.stage === 1 ? "1단계 통과" : "2단계 정밀"}
-                              </span>
-                            </td>
                             <td className="p-4 text-center font-mono font-bold text-xs">
                               <div className="flex items-center justify-center gap-1.5">
                                 <span className={item.contradiction_score > 0.6 ? "text-error-500" : item.contradiction_score > 0.2 ? "text-warning-500" : "text-success-500"}>
                                   {item.contradiction_score.toFixed(2)}
                                 </span>
                               </div>
-                            </td>
-                            <td className="p-4 text-center font-mono text-neutral-500 dark:text-neutral-400 text-xs">
-                              {item.nll_loss ? item.nll_loss.toFixed(4) : "-"}
                             </td>
                             <td className="p-4 text-right">
                               <button 
@@ -876,14 +964,14 @@ export default function App() {
                   </div>
 
                   <div className="bg-neutral-50 dark:bg-neutral-800 border border-neutral-200/60 dark:border-neutral-800 rounded-lg p-4 shadow-sm space-y-1">
-                    <p className="text-[10px] text-neutral-400 dark:text-neutral-500 font-bold uppercase tracking-wider">NLL 손실 확률</p>
+                    <p className="text-[10px] text-neutral-400 dark:text-neutral-500 font-bold uppercase tracking-wider">검증 방법</p>
                     <div className="flex items-baseline gap-1 pt-1">
-                      <span className="text-2xl font-bold font-mono text-neutral-900 dark:text-neutral-100">
-                        {selectedItem.nll_loss ? selectedItem.nll_loss.toFixed(2) : "-"}
+                      <span className="text-md font-bold text-neutral-900 dark:text-neutral-100">
+                        실시간 RAG 기사 대조
                       </span>
                     </div>
-                    <span className="text-[9px] text-neutral-400 font-bold block mt-3">
-                      {selectedItem.stage === 1 ? "1단계 고속 통과" : "2단계 심층 대조"}
+                    <span className="text-[9px] text-neutral-400 font-bold block mt-4">
+                      {selectedItem.sources ? `${selectedItem.sources.length}개 교차 검증 소스` : "실시간 웹 검색 활용"}
                     </span>
                   </div>
                 </div>
@@ -1095,7 +1183,7 @@ export default function App() {
                 </div>
 
                 {/* Search references list */}
-                {selectedItem.stage === 2 && (
+                {selectedItem.sources && selectedItem.sources.length > 0 && (
                   <div className="space-y-3">
                     <h4 className="text-[10px] font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-widest">
                       📡 실시간 웹 교차 수집 출처 ({selectedItem.sources?.length || 0}건)
@@ -1143,6 +1231,134 @@ export default function App() {
                 </button>
               </div>
 
+            </div>
+          )}
+            </>
+          ) : (
+            /* AI Chatbot Assistant Tab Content */
+            <div className="flex-1 flex flex-col h-full p-6 space-y-4 max-w-full overflow-hidden">
+              <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800/80 rounded-2xl p-6 shadow-sm flex flex-col h-[calc(100vh-140px)] relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-brand-500 via-brand-400 to-secondary-500"></div>
+                
+                {/* Chat Panel Header */}
+                <div className="border-b border-neutral-100 dark:border-neutral-800 pb-4 mb-4 flex justify-between items-center shrink-0">
+                  <div>
+                    <h2 className="text-lg font-bold tracking-tight text-neutral-950 dark:text-neutral-50 flex items-center gap-2">
+                      <MessageSquare className="text-brand-500" size={20} />
+                      AI 팩트체크 어시스턴트
+                    </h2>
+                    <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">자유롭게 소문이나 루머를 질문하세요. 실시간 웹 보도를 수집하여 팩트를 분석해 드립니다.</p>
+                  </div>
+                  <button 
+                    onClick={() => setGeneralChatHistory([
+                      {
+                        query: null,
+                        answer: "안녕하세요! 실시간 웹 검색과 RAG-LLM 기반의 AI 팩트체커 어시스턴트입니다. 궁금한 소문, 뉴스, 루머에 대해 질문하시면 실시간으로 관련 사실을 추적하고 검증 결과를 알려드립니다. (예: '성수대교 단차 9cm 사실인가요?')",
+                        sources: [],
+                        isSystem: true
+                      }
+                    ])}
+                    className="text-xs text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 flex items-center gap-1 border border-neutral-200 dark:border-neutral-800 rounded-lg px-2.5 py-1"
+                  >
+                    대화 초기화
+                  </button>
+                </div>
+
+                {/* Chat Message Logs Area */}
+                <div className="flex-1 overflow-y-auto space-y-4 pr-1 mb-4">
+                  {generalChatHistory.map((chat, idx) => (
+                    <div key={idx} className="space-y-2">
+                      {/* User Query */}
+                      {chat.query && (
+                        <div className="flex justify-end">
+                          <div className="bg-brand-500 text-white px-4 py-2.5 rounded-2xl rounded-tr-none text-sm font-bold shadow-sm max-w-[75%]">
+                            {chat.query}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* AI Answer */}
+                      <div className="flex justify-start">
+                        <div className="bg-neutral-50 dark:bg-neutral-850 border border-neutral-200/50 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 px-4 py-3 rounded-2xl rounded-tl-none text-sm font-medium shadow-sm max-w-[85%] space-y-3 leading-relaxed">
+                          {chat.loading ? (
+                            <span className="flex items-center gap-2 text-neutral-500 dark:text-neutral-400 font-bold py-1">
+                              <Loader2 size={16} className="animate-spin" /> 실시간 보도 검색 및 RAG AI 분석 진행 중...
+                            </span>
+                          ) : (
+                            <>
+                              <div className="whitespace-pre-wrap text-neutral-800 dark:text-neutral-200">
+                                {chat.answer}
+                              </div>
+
+                              {/* Search Sources for this reply */}
+                              {chat.sources && chat.sources.length > 0 && (
+                                <div className="pt-3 border-t border-neutral-200/50 dark:border-neutral-800 space-y-2">
+                                  <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest flex items-center gap-1">
+                                    <Globe size={11} /> 교차 검증 참고 출처 ({chat.sources.length}건)
+                                  </p>
+                                  <div className="flex flex-wrap gap-2">
+                                    {chat.sources.map((src, sIdx) => (
+                                      <a
+                                        key={sIdx}
+                                        href={src.link}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="text-[10px] bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700/60 rounded-lg px-2.5 py-1 text-neutral-600 dark:text-neutral-300 hover:text-brand-500 dark:hover:text-brand-400 font-bold truncate max-w-[200px]"
+                                        title={src.description}
+                                      >
+                                        {src.title}
+                                      </a>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Suggestions Cards */}
+                {generalChatHistory.length === 1 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mb-4 shrink-0">
+                    {[
+                      "성수대교 진입로 9cm 단차 발생 사실인가요?",
+                      "박세리 아버지가 재단 인장 위조로 고소당한 일 진짜인가요?",
+                      "벨기에 전투기 우크라이나 지원 출격 여부 팩트체크"
+                    ].map((sug, sIdx) => (
+                      <button
+                        key={sIdx}
+                        onClick={(e) => handleGeneralChatSubmit(e, sug)}
+                        className="text-left text-xs bg-neutral-50/50 dark:bg-neutral-900/30 border border-neutral-200 dark:border-neutral-800/80 hover:border-brand-500/60 dark:hover:border-brand-400/40 rounded-xl p-3.5 text-neutral-600 dark:text-neutral-400 hover:text-brand-600 dark:hover:text-brand-300 transition-all font-semibold active:scale-[0.98]"
+                      >
+                        {sug}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Chat Input form */}
+                <form onSubmit={handleGeneralChatSubmit} className="flex gap-2 shrink-0">
+                  <input
+                    type="text"
+                    value={generalChatInput}
+                    onChange={(e) => setGeneralChatInput(e.target.value)}
+                    placeholder="소문이나 검증이 필요한 질문을 입력해 주세요..."
+                    disabled={loadingGeneralChat}
+                    className="flex-1 bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 text-neutral-950 dark:text-neutral-100"
+                  />
+                  <button
+                    type="submit"
+                    disabled={loadingGeneralChat || !generalChatInput.trim()}
+                    className="bg-brand-500 hover:bg-brand-600 active:bg-brand-700 text-white rounded-xl px-5 py-3 font-bold transition-all shadow-sm disabled:opacity-40 flex items-center justify-center gap-1.5"
+                  >
+                    <Send size={16} />
+                    <span>질문 전송</span>
+                  </button>
+                </form>
+              </div>
             </div>
           )}
 

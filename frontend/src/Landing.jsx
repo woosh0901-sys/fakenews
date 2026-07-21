@@ -188,10 +188,10 @@ export default function Landing({
           style={{ animationDelay: "220ms" }}
         >
           <input
-            type="url"
+            type="text"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="검증하려는 기사, 인스타그램·X(트위터) 게시물 링크를 입력해 주세요."
+            placeholder="검증할 뉴스/SNS 링크(https://...) 또는 궁금한 질문을 입력해 주세요."
             required
             disabled={loading}
             className="w-full h-14 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-full pl-6 pr-30 text-sm shadow-md dark:shadow-[0_0_28px_rgba(255,255,255,0.10)] focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 dark:focus:ring-brand-400/30 dark:focus:border-brand-400 transition-all text-neutral-950 dark:text-neutral-100 disabled:opacity-60 disabled:cursor-not-allowed"
