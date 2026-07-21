@@ -464,7 +464,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 flex transition-colors duration-200 font-sans">
+    <div className="min-h-screen xl:h-screen xl:overflow-hidden bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 flex transition-colors duration-200 font-sans">
       
       {/* Sidebar Layout */}
       <aside className="hidden lg:flex w-80 shrink-0 flex-col bg-white dark:bg-neutral-900 border-r border-neutral-200 dark:border-neutral-800 p-6 sticky top-0 h-screen justify-between shadow-sm z-30 font-sans">
@@ -520,22 +520,41 @@ export default function App() {
           <div className="space-y-4">
             <h2 className="text-xs font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-widest">실시간 탐지 현황</h2>
             
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-neutral-50 dark:bg-neutral-800 border border-neutral-200/60 dark:border-neutral-800 rounded-lg p-4 shadow-sm">
-                <p className="text-[10px] text-neutral-400 font-bold uppercase">총 검사</p>
-                <h3 className="text-xl font-bold font-mono mt-1 text-neutral-950 dark:text-neutral-50">{stats.total_checks}</h3>
+            {/* 총 검사 + 판정 분포 스택 바 (한눈에 비율 파악) */}
+            <div className="bg-neutral-50 dark:bg-neutral-800 border border-neutral-200/60 dark:border-neutral-800 rounded-lg p-4 shadow-sm space-y-3.5">
+              <div className="flex items-baseline justify-between">
+                <span className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider">총 검사</span>
+                <span className="text-2xl font-bold font-mono text-neutral-950 dark:text-neutral-50 leading-none">{stats.total_checks}</span>
               </div>
-              <div className="bg-success-50/40 dark:bg-success-950/10 border border-success-500/20 dark:border-success-500/15 rounded-lg p-4 shadow-sm">
-                <p className="text-[10px] text-success-700 dark:text-success-400 font-bold uppercase">진짜 뉴스</p>
-                <h3 className="text-xl font-bold font-mono mt-1 text-success-700 dark:text-success-400">{stats.real_count}</h3>
+
+              <div className="flex h-2 w-full rounded-full overflow-hidden bg-neutral-200 dark:bg-neutral-700">
+                <div className="bg-success-500 transition-all duration-500" style={{ width: `${(stats.real_count / Math.max(stats.total_checks, 1)) * 100}%` }} />
+                <div className="bg-error-500 transition-all duration-500" style={{ width: `${(stats.fake_count / Math.max(stats.total_checks, 1)) * 100}%` }} />
+                <div className="bg-warning-500 transition-all duration-500" style={{ width: `${(stats.suspicious_count / Math.max(stats.total_checks, 1)) * 100}%` }} />
               </div>
-              <div className="bg-error-50/40 dark:bg-error-950/10 border border-error-500/20 dark:border-error-500/15 rounded-lg p-4 shadow-sm">
-                <p className="text-[10px] text-error-600 dark:text-error-400 font-bold uppercase">가짜 뉴스</p>
-                <h3 className="text-xl font-bold font-mono mt-1 text-error-600 dark:text-error-400">{stats.fake_count}</h3>
-              </div>
-              <div className="bg-warning-50/40 dark:bg-warning-950/10 border border-warning-500/20 dark:border-warning-500/15 rounded-lg p-4 shadow-sm">
-                <p className="text-[10px] text-warning-700 dark:text-warning-400 font-bold uppercase">의심/과장</p>
-                <h3 className="text-xl font-bold font-mono mt-1 text-warning-700 dark:text-warning-400">{stats.suspicious_count}</h3>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <div className="flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-success-500 shrink-0" />
+                    <span className="text-[10px] text-neutral-500 dark:text-neutral-400 font-bold">진짜</span>
+                  </div>
+                  <p className="text-lg font-bold font-mono text-success-600 dark:text-success-400 mt-0.5 leading-none">{stats.real_count}</p>
+                </div>
+                <div>
+                  <div className="flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-error-500 shrink-0" />
+                    <span className="text-[10px] text-neutral-500 dark:text-neutral-400 font-bold">가짜</span>
+                  </div>
+                  <p className="text-lg font-bold font-mono text-error-600 dark:text-error-400 mt-0.5 leading-none">{stats.fake_count}</p>
+                </div>
+                <div>
+                  <div className="flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-warning-500 shrink-0" />
+                    <span className="text-[10px] text-neutral-500 dark:text-neutral-400 font-bold">의심</span>
+                  </div>
+                  <p className="text-lg font-bold font-mono text-warning-600 dark:text-warning-400 mt-0.5 leading-none">{stats.suspicious_count}</p>
+                </div>
               </div>
             </div>
 
@@ -574,7 +593,7 @@ export default function App() {
       </aside>
 
       {/* Main Content Pane */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 xl:min-h-0">
         
         {/* Mobile Header */}
         <header className="lg:hidden flex justify-between items-center px-6 py-4 border-b border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 z-20">
@@ -606,15 +625,15 @@ export default function App() {
           <div className={`flex-1 p-6 space-y-6 overflow-y-auto max-w-full ${selectedItem ? "xl:w-2/3" : "w-full"} transition-all duration-300`}>
             
             {/* Search/URL Input Box - Sleek Google-Search style */}
-            <section className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800/80 rounded-lg p-6 shadow-sm relative overflow-hidden">
+            <section className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800/80 rounded-lg p-5 shadow-sm relative overflow-hidden">
               <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-brand-500 via-brand-400 to-secondary-500"></div>
-              
-              <div className="max-w-2xl">
-                <h2 className="text-xl font-bold tracking-tight text-neutral-950 dark:text-neutral-50">인공지능 교차 검증 시작하기</h2>
-                <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1 font-medium">분석할 신문 기사나 인스타그램·X(트위터) 공개 게시물 주소(URL)를 입력하면 1차 통계 문맥 검사 및 2차 실시간 웹 보도 대조를 진행합니다. (SNS 게시물은 본문 기반으로 바로 2차 정밀 검증)</p>
+
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-bold tracking-tight text-neutral-950 dark:text-neutral-50">인공지능 교차 검증</h2>
+                <span className="text-[11px] text-neutral-400 dark:text-neutral-500 font-medium">기사·인스타그램·X(트위터) 링크를 넣으면 1차 통계 + 2차 실시간 웹 대조로 판정합니다.</span>
               </div>
 
-              <form onSubmit={handleCheck} className="flex gap-2.5 mt-5">
+              <form onSubmit={handleCheck} className="flex gap-2.5 mt-3.5">
                 <div className="relative flex-1">
                   <input 
                     type="url" 
