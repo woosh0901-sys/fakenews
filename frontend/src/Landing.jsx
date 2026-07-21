@@ -68,6 +68,17 @@ export default function Landing({
   // 되감기(0번으로 복귀) 프레임에서는 전환을 끊어 역주행이 보이지 않게 한다
   const isRewind = paragraphs.length > 0 && scanStep % paragraphs.length === 0 && scanStep !== 0;
 
+  // 티커 → 분석 블록 전환: 티커를 먼저 부드럽게 내보낸 뒤 분석 블록을 띄운다
+  const [tickerVisible, setTickerVisible] = useState(true);
+  useEffect(() => {
+    if (!analyzing) {
+      setTickerVisible(true);
+      return;
+    }
+    const t = setTimeout(() => setTickerVisible(false), 280);
+    return () => clearTimeout(t);
+  }, [analyzing]);
+
   // URL별 검증 횟수 상위 5건 (동률이면 최신순)
   const topArticles = useMemo(() => {
     if (!Array.isArray(history)) return [];
@@ -195,8 +206,8 @@ export default function Landing({
         </form>
 
         {/* 분석 중: 상태줄 + 기사 본문 스캔 (Figma landing_loading) */}
-        {analyzing ? (
-          <section className="float-in mt-8 w-full max-w-2xl" style={{ animationDelay: "60ms" }}>
+        {analyzing && !tickerVisible ? (
+          <section className="float-in mt-8 w-full max-w-2xl" style={{ animationDelay: "40ms" }}>
             <p className="flex items-center justify-center gap-2 text-base md:text-lg font-bold text-neutral-900 dark:text-neutral-100 text-center">
               {analysisDone ? (
                 <>
@@ -231,20 +242,33 @@ export default function Landing({
                   className={`article-scan space-y-3.5 ${isRewind ? "no-transition" : ""}`}
                   style={{ transform: `translateY(-${scanY}px)` }}
                 >
-                  {[...paragraphs, ...paragraphs].map((p, i) => (
-                    <p
-                      key={i}
-                      className="text-xs leading-relaxed text-neutral-500 dark:text-neutral-400 text-center px-4"
-                    >
-                      {p}
-                    </p>
-                  ))}
+                  {[...paragraphs, ...paragraphs].map((p, i) => {
+                    // 지금 '분석 중'인 문단 하나만 진하게 — 위로 빠져나가기 직전, 가장 선명한 구간에 놓인 문단
+                    const active = i === (scanStep % paragraphs.length) + 1;
+                    return (
+                      <p
+                        key={i}
+                        className={`text-xs leading-relaxed text-center px-4 transition-colors duration-500 ${
+                          active
+                            ? "text-neutral-900 dark:text-neutral-100"
+                            : "text-neutral-400 dark:text-neutral-600"
+                        }`}
+                      >
+                        {p}
+                      </p>
+                    );
+                  })}
                 </div>
               )}
             </div>
           </section>
         ) : (
         /* 실시간 가장 많이 검증된 기사 (Top 5) 티커 */
+        <div
+          className={`w-full flex justify-center transition-all duration-300 ease-out ${
+            analyzing ? "opacity-0 -translate-y-2" : "opacity-100"
+          }`}
+        >
         <section
           className="float-in mt-8 w-full max-w-xl"
           style={{ animationDelay: "300ms" }}
@@ -309,6 +333,7 @@ export default function Landing({
             )}
           </div>
         </section>
+        </div>
         )}
       </main>
     </div>
