@@ -1,6 +1,8 @@
 import os
 import sys
 import httpx
+import urllib.parse
+from datetime import datetime, timedelta
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -110,6 +112,51 @@ async def check_url(payload: CheckRequest):
     if not url.startswith("http://") and not url.startswith("https://"):
         raise HTTPException(status_code=400, detail="올바른 HTTP/HTTPS URL 형식을 입력해 주세요.")
         
+    # 24시간 내 동일 URL에 대한 캐시가 있는지 먼저 확인하여 API 호출 횟수를 획기적으로 아낍니다.
+    if SUPABASE_ENABLED:
+        try:
+            # Supabase timestamps are UTC, query using ISO UTC format
+            time_limit = (datetime.utcnow() - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            encoded_url = urllib.parse.quote(url)
+            cache_query_url = f"{SUPABASE_URL}/rest/v1/checks?select=*,sources:check_references(*)&url=eq.{encoded_url}&created_at=gte.{time_limit}&order=created_at.desc&limit=1"
+            headers = get_supabase_headers()
+            
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                cache_resp = await client.get(cache_query_url, headers=headers)
+                if cache_resp.status_code == 200:
+                    cache_data = cache_resp.json()
+                    if cache_data and len(cache_data) > 0:
+                        cache_item = cache_data[0]
+                        print(f"[★] 동일 URL에 대한 최근 24시간 내 캐시된 검사 결과가 있어 DB에서 즉시 반환합니다: {url}")
+                        
+                        # Reference format normalization
+                        raw_sources = cache_item.get("sources") or []
+                        formatted_sources = []
+                        for s in raw_sources:
+                            formatted_sources.append({
+                                "title": s.get("title"),
+                                "link": s.get("link"),
+                                "description": s.get("description"),
+                                "pubDate": s.get("pub_date")
+                            })
+                            
+                        result = {
+                            "id": cache_item.get("id"),
+                            "verdict": cache_item.get("verdict"),
+                            "contradiction_score": cache_item.get("contradiction_score"),
+                            "nll_loss": cache_item.get("nll_loss"),
+                            "reason": cache_item.get("reason"),
+                            "stage": cache_item.get("stage"),
+                            "target_title": cache_item.get("title"),
+                            "target_url": cache_item.get("url"),
+                            "claims_breakdown": cache_item.get("claims_breakdown") or [],
+                            "sources": formatted_sources,
+                            "cached": True
+                        }
+                        return result
+        except Exception as cache_err:
+            print(f"[-] 캐시 조회 실패 (정상 팩트체크 파이프라인으로 진행): {cache_err}")
+            
     try:
         # Lazy load NLL model in thread pool
         nll_model, nll_threshold = await run_in_threadpool(get_nll_model_lazy)

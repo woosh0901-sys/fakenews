@@ -971,24 +971,12 @@ def check_url_validity(url, nll_model=None, nll_threshold=5.6):
         # SNS는 '[플랫폼] 유저명:' 접두어를 제외한 본문에서 키워드 추출
         search_base = article.get('search_text') or article['title']
         
-        # SNS 또는 커뮤니티의 경우 비정형 데이터이므로 LLM 기반 검색 쿼리 생성을 먼저 시도합니다.
-        search_query = None
-        is_sns_or_community = bool(sns_label) or any(dom in url for dom in [
-            "dcinside.com", "fmkorea.com", "ruliweb.com", "clien.net", "ppomppu.co.kr", 
-            "instiz.net", "inven.co.kr", "todayhumor.co.kr", "mlbpark.donga.com", 
-            "slrclub.com", "pann.nate.com", "bobaedream.co.kr", "theqoo.net", "instiz"
-        ])
-        
-        if is_sns_or_community:
-            print("    - SNS/커뮤니티 출처 탐지: 더 정밀한 검색을 위해 LLM 기반 검색 쿼리 생성을 시도합니다.")
-            search_query = generate_search_query_via_llm(article['title'], article['content'])
-            
-        if not search_query:
-            keywords = extract_keywords_fast(search_base)
-            if not keywords:
-                search_query = search_base[:15]
-            else:
-                search_query = " ".join(keywords)
+        # RAG 검색 쿼리는 형태소 기반 로컬 분석(extract_keywords_fast)만 사용하여 Gemini 호출 1회를 완전히 절약합니다.
+        keywords = extract_keywords_fast(search_base)
+        if not keywords:
+            search_query = search_base[:15]
+        else:
+            search_query = " ".join(keywords)
                 
         print(f"    - 추출된 검색어: '{search_query}'")
         
