@@ -10,8 +10,7 @@ from bs4 import BeautifulSoup
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from naver_news_api import fetch_naver_news
 
-# Import Trigram Language Model from reconstruction_detector
-from reconstruction_detector import TrigramLanguageModel, custom_tokenize
+# Trigram language model imports removed
 
 OLLAMA_GENERATE_URL = "http://localhost:11434/api/generate"
 MODEL_NAME = "qwen3.5:latest"
@@ -829,108 +828,8 @@ def fact_check_article_with_sources(target_title, target_content, sources, conte
         "claims_breakdown": []
     }
 
-def get_trained_nll_model():
-    """
-    real_news.json 코퍼스를 로드하여 70%는 학습용, 30%는 검증용으로 분할합니다.
-    검증용 데이터의 NLL Loss를 기반으로 동적 임계값을 계산하여 데이터 희소성(Sparsity) 문제를 보정합니다.
-    """
-    print("\n[*] 1단계 NLL 통계 필터 로딩 및 학습 중...")
-    try:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        real_news_path = os.path.join(base_dir, "data", "real_news.json")
-            
-        with open(real_news_path, "r", encoding="utf-8") as f:
-            real_data = json.load(f)
-            
-        real_corpus = []
-        for art in real_data:
-            tokens = custom_tokenize(art['title'] + " " + art['content'])
-            real_corpus.append(tokens)
-            
-        # 70:30 학습/검증 분할
-        import random
-        random.seed(42)
-        random.shuffle(real_corpus)
-        
-        train_size = int(len(real_corpus) * 0.7)
-        train_corpus = real_corpus[:train_size]
-        val_corpus = real_corpus[train_size:]
-        
-        lm = TrigramLanguageModel()
-        lm.train(train_corpus)
-        print(f"    - NLL 모델 학습 완료 (학습용 기사: {len(train_corpus)}개, 검증용 기사: {len(val_corpus)}개)")
-        
-        # 임계치는 '보지 못한(unseen) 진짜 뉴스'인 검증용 데이터에서 계산해야 합니다.
-        # 이렇게 해야 데이터 희소성으로 인해 자연스럽게 발생하는 페널티 점수가 임계치에 올바르게 반영됩니다.
-        losses = []
-        for tokens in val_corpus:
-            loss, _ = lm.calculate_sentence_loss(tokens)
-            if loss > 0:
-                losses.append(loss)
-                
-        avg_loss = sum(losses) / len(losses)
-        variance = sum((x - avg_loss) ** 2 for x in losses) / len(losses)
-        std_dev = math.sqrt(variance)
-        threshold = avg_loss + (1.2 * std_dev) # 1.2 sigma (가짜뉴스 탐지율 99.11% 최적화 세팅)
-        
-        print(f"    - 동적 NLL 임계값 (Threshold) 설정 완료: {threshold:.4f} (검증셋 평균: {avg_loss:.4f}, 표준편차: {std_dev:.4f})")
-        return lm, threshold
-    except Exception as e:
-        print(f"[-] NLL 모델 학습 중 에러 발생 (기본 임계값 5.6 사용): {e}")
-        return None, 5.6
+# NLL model loading and training code has been completely removed.
 
-def load_nll_model():
-    """
-    Tries to load a pre-trained NLL model from the JSON cache file.
-    If the cache does not exist, it trains the model and saves it.
-    """
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    trained_model_path = os.path.join(base_dir, "data", "nll_model_trained.json")
-    
-    if os.path.exists(trained_model_path):
-        print("\n[*] 1단계 NLL 통계 필터 로딩 중 (캐시된 모델 사용)...")
-        try:
-            import time
-            from collections import Counter
-            t0 = time.time()
-            with open(trained_model_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                
-            lm = TrigramLanguageModel()
-            lm.total_words = data["total_words"]
-            lm.vocab = set(data["vocab"])
-            threshold = data["threshold"]
-            
-            lm.unigrams = Counter(data["unigrams"])
-            lm.bigrams = Counter({(k.split("\t")[0], k.split("\t")[1]): v for k, v in data["bigrams"].items()})
-            lm.trigrams = Counter({(k.split("\t")[0], k.split("\t")[1], k.split("\t")[2]): v for k, v in data["trigrams"].items()})
-            
-            print(f"    - 캐시된 NLL 모델 로드 완료 ({time.time() - t0:.3f}초 소요, 임계값: {threshold:.4f})")
-            return lm, threshold
-        except Exception as e:
-            print(f"[-] 캐시된 NLL 모델 로드 중 에러 발생, 재학습을 시도합니다: {e}")
-            
-    # Fallback to training
-    lm, threshold = get_trained_nll_model()
-    
-    # Save cache
-    try:
-        print("[*] NLL 모델 캐시 저장 중...")
-        serialized = {
-            "total_words": lm.total_words,
-            "vocab": list(lm.vocab),
-            "threshold": threshold,
-            "unigrams": dict(lm.unigrams),
-            "bigrams": {f"{k[0]}\t{k[1]}": v for k, v in lm.bigrams.items()},
-            "trigrams": {f"{k[0]}\t{k[1]}\t{k[2]}": v for k, v in lm.trigrams.items()}
-        }
-        with open(trained_model_path, "w", encoding="utf-8") as f:
-            json.dump(serialized, f, ensure_ascii=False)
-        print(f"[+] NLL 모델 캐시 저장 완료: {trained_model_path}")
-    except Exception as e:
-        print(f"[-] NLL 모델 캐시 저장 실패: {e}")
-        
-    return lm, threshold
 
 
 def generate_search_query_via_llm(title, content):
@@ -990,35 +889,8 @@ def check_url_validity(url, nll_model=None, nll_threshold=5.6):
         print(f"    - 기사 제목: {article['title']}")
         print(f"    - 본문 길이: {len(article['content'])} 자 추출 완료.")
 
-        # === 1단계: NLL 통계 필터 검사 ===
-        # SNS 본문은 뉴스 문체 코퍼스로 학습된 NLL 필터에 부적합하므로 건너뛰고 바로 2단계 검증
+        # === 1단계: NLL 통계 필터 검사 (완전히 제거됨) ===
         nll_loss = None
-        if sns_label:
-            print("\n[1-5] SNS 게시물은 1단계 NLL 필터를 건너뛰고 2단계 정밀 팩트체크로 바로 진행합니다.")
-        elif nll_model:
-            print("\n[1-5] 1단계 NLL 통계 필터 분석 중...")
-            tokens = custom_tokenize(article['title'] + " " + article['content'])
-            nll_loss, _ = nll_model.calculate_sentence_loss(tokens)
-            print(f"    - 계산된 NLL Loss: {nll_loss:.4f} (임계값: {nll_threshold:.4f})")
-            
-            if nll_loss < nll_threshold:
-                print("    [★] NLL 점수가 임계값 미만입니다. 자연스러운 문장 구조를 가진 진짜 뉴스로 판단되어 패스합니다.")
-                return {
-                    "verdict": "REAL",
-                    "reason": f"1단계 NLL 통계 필터 검사 결과, 기사 문맥 전이 확률 손실(NLL Loss: {nll_loss:.4f})이 정상 범위(임계값: {nll_threshold:.4f}) 이내입니다. 조작되었거나 왜곡된 가짜 뉴스일 가능성이 낮아 통과되었습니다.",
-                    "contradiction_score": 0.0,
-                    "target_title": article['title'],
-                    "target_url": url,
-                    "nll_loss": round(nll_loss, 4),
-                    "stage": 1,
-                    "sources": [],
-                    "claims_breakdown": []
-                }
-            else:
-                print("    [!] NLL 점수가 임계값을 초과했습니다. 기사의 문맥 연결이 부자연스러워 2단계 정밀 팩트체크로 이관합니다.")
-                
-        else:
-            print("\n[-] NLL 모델이 로드되지 않아 1단계를 건너뛰고 2단계로 바로 진행합니다.")
             
         # === 2단계: RAG-LLM 팩트체크 ===
         print("\n[2] 로컬 텍스트 분석 기반 핵심 검색 키워드 추출 중...")
@@ -1095,9 +967,6 @@ if __name__ == "__main__":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
     
-    # 1단계 NLL 모델 로딩 및 학습 (캐시 지원)
-    nll_model, nll_threshold = load_nll_model()
-    
     # 2. 테스트 구동
     if len(sys.argv) < 2:
         print("\n사용법: python fact_checker_by_url.py <검증할 뉴스 기사 URL>")
@@ -1107,7 +976,7 @@ if __name__ == "__main__":
     else:
         test_url = sys.argv[1]
         
-    final_verdict = check_url_validity(test_url, nll_model, nll_threshold)
+    final_verdict = check_url_validity(test_url)
     
     if final_verdict:
         print("\n=============================================")

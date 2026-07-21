@@ -54,7 +54,6 @@ export default function App() {
     real_count: 0,
     fake_count: 0,
     suspicious_count: 0,
-    avg_nll: 0,
     avg_contradiction_score: 0
   });
 
@@ -189,17 +188,16 @@ export default function App() {
     setActiveStep(1);
     
     // Simulate steps visually to guide the user through the pipeline
-    const t2 = setTimeout(() => setActiveStep(2), 1200);
-    const t3 = setTimeout(() => setActiveStep(3), 2400);
-    const t4 = setTimeout(() => setActiveStep(4), 3600);
+    const t2 = setTimeout(() => setActiveStep(2), 1500);
+    const t3 = setTimeout(() => setActiveStep(3), 3000);
     
-    activeTimersRef.current = [t2, t3, t4];
+    activeTimersRef.current = [t2, t3];
 
     try {
       const res = await axios.post(`${API_BASE_URL}/check`, { url: targetUrl }, { timeout: 90000 });
       activeTimersRef.current.forEach(clearTimeout);
       activeTimersRef.current = [];
-      setActiveStep(5);
+      setActiveStep(4);
       
       // Delay slightly so user sees step 5 (success) before update
       const tSuccess = setTimeout(async () => {
@@ -444,9 +442,8 @@ export default function App() {
   // Loader steps definition
   const loaderSteps = [
     { label: "1. 본문 수집", desc: "웹페이지 크롤링 및 전처리" },
-    { label: "2. 문맥 분석", desc: "NLL 언어 모델 무결성 검증" },
-    { label: "3. 교차 검색", desc: "포털 API & 구글 웹 실시간 추적" },
-    { label: "4. 사실 검증", desc: "Gemini 클라우드 사실관계 판정" }
+    { label: "2. 교차 검색", desc: "포털 API & 구글 웹 실시간 추적" },
+    { label: "3. 사실 검증", desc: "Gemini 클라우드 사실관계 판정" }
   ];
 
   // 첫 화면: 랜딩 페이지
@@ -570,10 +567,7 @@ export default function App() {
                   style={{ width: `${stats.avg_contradiction_score * 100}%` }}
                 />
               </div>
-              <div className="flex justify-between items-center text-xs pt-1">
-                <span className="text-neutral-500 dark:text-neutral-400 font-medium">평균 NLL 손실</span>
-                <span className="font-mono font-bold text-neutral-950 dark:text-neutral-50">{stats.avg_nll.toFixed(2)}</span>
-              </div>
+              {/* Avg NLL stats removed */}
             </div>
 
           </div>
@@ -801,16 +795,14 @@ export default function App() {
                     <tr>
                       <th className="p-4 font-bold text-xs uppercase tracking-wider">판정 결과</th>
                       <th className="p-4 font-bold text-xs uppercase tracking-wider">기사 제목 / 주소</th>
-                      <th className="p-4 font-bold text-xs uppercase tracking-wider text-center">검사 단계</th>
                       <th className="p-4 font-bold text-xs uppercase tracking-wider text-center">모순 점수</th>
-                      <th className="p-4 font-bold text-xs uppercase tracking-wider text-center">NLL 손실</th>
                       <th className="p-4 font-bold text-xs uppercase tracking-wider text-right">삭제</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800/60">
                     {history.length === 0 ? (
                       <tr>
-                        <td colSpan="6" className="p-12 text-center text-neutral-500 dark:text-neutral-400 font-medium">
+                        <td colSpan="4" className="p-12 text-center text-neutral-500 dark:text-neutral-400 font-medium">
                           검증 기록이 존재하지 않습니다. 뉴스 링크를 입력하여 신뢰도를 판정해 보세요.
                         </td>
                       </tr>
@@ -830,24 +822,12 @@ export default function App() {
                               <span className="block text-neutral-950 dark:text-neutral-50 font-bold leading-tight truncate">{item.title}</span>
                               <span className="text-xs text-neutral-400 font-medium truncate block mt-0.5 max-w-xs md:max-w-md">{item.url}</span>
                             </td>
-                            <td className="p-4 text-center">
-                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                                item.stage === 1 
-                                  ? "bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400"
-                                  : "bg-info-50 dark:bg-info-950/40 text-info-700 dark:text-info-400"
-                              }`}>
-                                {item.stage === 1 ? "1단계 통과" : "2단계 정밀"}
-                              </span>
-                            </td>
                             <td className="p-4 text-center font-mono font-bold text-xs">
                               <div className="flex items-center justify-center gap-1.5">
                                 <span className={item.contradiction_score > 0.6 ? "text-error-500" : item.contradiction_score > 0.2 ? "text-warning-500" : "text-success-500"}>
                                   {item.contradiction_score.toFixed(2)}
                                 </span>
                               </div>
-                            </td>
-                            <td className="p-4 text-center font-mono text-neutral-500 dark:text-neutral-400 text-xs">
-                              {item.nll_loss ? item.nll_loss.toFixed(4) : "-"}
                             </td>
                             <td className="p-4 text-right">
                               <button 
@@ -944,14 +924,14 @@ export default function App() {
                   </div>
 
                   <div className="bg-neutral-50 dark:bg-neutral-800 border border-neutral-200/60 dark:border-neutral-800 rounded-lg p-4 shadow-sm space-y-1">
-                    <p className="text-[10px] text-neutral-400 dark:text-neutral-500 font-bold uppercase tracking-wider">NLL 손실 확률</p>
+                    <p className="text-[10px] text-neutral-400 dark:text-neutral-500 font-bold uppercase tracking-wider">검증 방법</p>
                     <div className="flex items-baseline gap-1 pt-1">
-                      <span className="text-2xl font-bold font-mono text-neutral-900 dark:text-neutral-100">
-                        {selectedItem.nll_loss ? selectedItem.nll_loss.toFixed(2) : "-"}
+                      <span className="text-md font-bold text-neutral-900 dark:text-neutral-100">
+                        실시간 RAG 기사 대조
                       </span>
                     </div>
-                    <span className="text-[9px] text-neutral-400 font-bold block mt-3">
-                      {selectedItem.stage === 1 ? "1단계 고속 통과" : "2단계 심층 대조"}
+                    <span className="text-[9px] text-neutral-400 font-bold block mt-4">
+                      {selectedItem.sources ? `${selectedItem.sources.length}개 교차 검증 소스` : "실시간 웹 검색 활용"}
                     </span>
                   </div>
                 </div>
@@ -1163,7 +1143,7 @@ export default function App() {
                 </div>
 
                 {/* Search references list */}
-                {selectedItem.stage === 2 && (
+                {selectedItem.sources && selectedItem.sources.length > 0 && (
                   <div className="space-y-3">
                     <h4 className="text-[10px] font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-widest">
                       📡 실시간 웹 교차 수집 출처 ({selectedItem.sources?.length || 0}건)
