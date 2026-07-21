@@ -5,6 +5,23 @@ import { Shield, TrendingUp, Moon, Sun, ArrowRight } from "lucide-react";
 const ROW_OPACITY = [1, 0.72, 0.55, 0.4, 0.28];
 const TICKER_INTERVAL_MS = 4000;
 
+// 팩트체크 판정 배지 — 색상은 대시보드 판정 배지와 통일(진짜=초록/가짜=빨강/의심=주황)
+const VERDICT_BADGE = {
+  REAL: {
+    label: "진짜뉴스",
+    cls: "bg-success-50 text-success-700 border-success-500/25 dark:bg-success-950/40 dark:text-success-400",
+  },
+  FAKE: {
+    label: "가짜뉴스",
+    cls: "bg-error-50 text-error-600 border-error-500/25 dark:bg-error-950/40 dark:text-error-400",
+  },
+  SUSPICIOUS: {
+    label: "의심",
+    cls: "bg-warning-50 text-warning-700 border-warning-500/25 dark:bg-warning-950/40 dark:text-warning-400",
+  },
+};
+const verdictBadge = (verdict) => VERDICT_BADGE[verdict] || VERDICT_BADGE.SUSPICIOUS;
+
 export default function Landing({ darkMode, setDarkMode, history, loading, onSubmit, onOpenDashboard }) {
   const [url, setUrl] = useState("");
   const [offset, setOffset] = useState(0);
@@ -63,7 +80,7 @@ export default function Landing({ darkMode, setDarkMode, history, loading, onSub
   return (
     <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 font-sans flex flex-col transition-colors duration-200">
       {/* Top bar: 로고 + 보조 링크/테마 토글 */}
-      <header className="flex items-center justify-between px-6 md:px-10 py-6">
+      <header className="float-in flex items-center justify-between px-6 md:px-10 py-6">
         <div className="flex items-center gap-3">
           <div className="p-2.5 bg-brand-500 dark:bg-brand-400 rounded-lg text-white shadow-md shadow-brand-500/20">
             <Shield size={24} />
@@ -96,17 +113,28 @@ export default function Landing({ darkMode, setDarkMode, history, loading, onSub
 
       {/* 중앙 히어로 */}
       <main className="flex-1 flex flex-col items-center justify-center px-6 pb-16 -mt-8">
-        {/* 아이브로: Figma = SUIT Regular 36px, 네이비→그린 그라디언트 */}
-        <p className="text-xl md:text-[26px] font-normal bg-clip-text text-transparent bg-gradient-to-r from-brand-300 to-secondary-600">
+        {/* 아이브로: Figma = SUIT Regular, 네이비→그린 그라디언트 (다크 모드는 시인성 위해 한 단계 밝게) */}
+        <p
+          className="float-in text-xl md:text-[26px] font-normal bg-clip-text text-transparent bg-gradient-to-r from-brand-300 to-secondary-600 dark:from-brand-200 dark:to-secondary-400"
+          style={{ animationDelay: "60ms" }}
+        >
           그 기사.. 팩트일까요?
         </p>
-        {/* 헤드라인: Figma = SUIT Heavy 64px, 네이비(0%)→블루(71%) 그라디언트, 다크 모드도 동일 색상 */}
-        <h2 className="mt-2 text-4xl md:text-5xl font-black tracking-tight text-center leading-tight bg-clip-text text-transparent bg-gradient-to-r from-brand-500 from-0% to-info-600 to-[71%]">
+        {/* 헤드라인: Figma = SUIT Heavy, 네이비(0%)→블루(71%) 그라디언트.
+            자간은 대형 헤드라인에 맞춰 더 조이고(-0.03em), 다크 모드는 시작 네이비가 묻히지 않도록 밝은 블루로 승급 */}
+        <h2
+          className="float-in mt-1 text-4xl md:text-5xl font-black tracking-[-0.03em] text-center leading-tight bg-clip-text text-transparent bg-gradient-to-r from-brand-500 from-0% to-info-600 to-[71%] dark:from-brand-300 dark:to-info-400"
+          style={{ animationDelay: "140ms" }}
+        >
           AI에게 팩트를 체크해보세요.
         </h2>
 
         {/* 알약형 검색 입력 + 내장 검증하기 버튼 */}
-        <form onSubmit={handleSubmit} className="mt-8 w-full max-w-2xl relative">
+        <form
+          onSubmit={handleSubmit}
+          className="float-in mt-8 w-full max-w-2xl relative"
+          style={{ animationDelay: "220ms" }}
+        >
           <input
             type="text"
             value={url}
@@ -126,7 +154,10 @@ export default function Landing({ darkMode, setDarkMode, history, loading, onSub
         </form>
 
         {/* 실시간 가장 많이 검증된 기사 (Top 5) 티커 */}
-        <section className="mt-8 w-full max-w-xl">
+        <section
+          className="float-in mt-8 w-full max-w-xl"
+          style={{ animationDelay: "300ms" }}
+        >
           <p className="flex items-center justify-center gap-1.5 text-xs font-bold text-neutral-700 dark:text-neutral-300">
             <TrendingUp size={14} className="text-info-600 dark:text-info-400" />
             실시간 가장 많이 검증된 기사 (Top 5)
@@ -142,43 +173,47 @@ export default function Landing({ darkMode, setDarkMode, history, loading, onSub
                 아직 검증된 기사가 없습니다. 첫 번째 기사를 검증해 보세요!
               </p>
             ) : (
-              <ul
-                key={offset}
-                className="space-y-3"
-                style={{ animation: "ticker-in 500ms ease" }}
-              >
-                {rotated.map((item, idx) => (
-                  <li
-                    key={`${item.rank}-${item.url}`}
-                    style={{ opacity: ROW_OPACITY[idx] ?? 0.28 }}
-                  >
-                    {/* 행 전체가 클릭 영역 */}
-                    <a
-                      href={item.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      title={item.title}
-                      className="flex items-center justify-start gap-2 min-w-0 w-full group"
+              <ul key={offset} className="space-y-3 ticker-in">
+                {rotated.map((item, idx) => {
+                  const badge = verdictBadge(item.verdict);
+                  return (
+                    <li
+                      key={`${item.rank}-${item.url}`}
+                      style={{ opacity: ROW_OPACITY[idx] ?? 0.28 }}
                     >
-                      <span
-                        className={`shrink-0 font-bold ${idx === 0
-                            ? "text-sm text-info-600 dark:text-info-400"
-                            : "text-xs text-info-500 dark:text-info-400"
-                          }`}
+                      {/* 행 전체가 클릭 영역: [순위] [제목……] [팩트체크 배지] */}
+                      <a
+                        href={item.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={item.title}
+                        className="flex items-center gap-3 w-full group"
                       >
-                        {item.rank}
-                      </span>
-                      <span
-                        className={`truncate group-hover:underline ${idx === 0
-                            ? "text-sm font-bold text-neutral-900 dark:text-neutral-100"
-                            : "text-xs font-medium text-neutral-700 dark:text-neutral-300"
-                          }`}
-                      >
-                        {item.title}
-                      </span>
-                    </a>
-                  </li>
-                ))}
+                        <span
+                          className={`shrink-0 font-bold ${idx === 0
+                              ? "text-sm text-info-600 dark:text-info-400"
+                              : "text-xs text-info-500 dark:text-info-400"
+                            }`}
+                        >
+                          {item.rank}
+                        </span>
+                        <span
+                          className={`flex-1 min-w-0 truncate text-left group-hover:underline ${idx === 0
+                              ? "text-sm font-bold text-neutral-900 dark:text-neutral-100"
+                              : "text-xs font-medium text-neutral-700 dark:text-neutral-300"
+                            }`}
+                        >
+                          {item.title}
+                        </span>
+                        <span
+                          className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold ${badge.cls}`}
+                        >
+                          {badge.label}
+                        </span>
+                      </a>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>
