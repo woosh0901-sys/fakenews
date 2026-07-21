@@ -90,6 +90,60 @@ def fetch_duckduckgo_search(query, max_results=3):
         print(f"[-] DuckDuckGo 웹 검색 중 에러 발생: {e}")
     return results
 
+def extract_news_urls_from_text(text, exclude_url=None):
+    """
+    텍스트 내에서 HTTP/HTTPS URL들을 추출하고,
+    검사 대상 본래 URL 및 무의미한 SNS/커뮤니티 도메인을 제외한 실제 언론사/뉴스 도메인들만 반환합니다.
+    """
+    if not text:
+        return []
+        
+    # URL 정규식 패턴
+    url_pattern = r'https?://[^\s<>"]+|www\.[^\s<>"]+'
+    urls = re.findall(url_pattern, text)
+    
+    # 중복 제거 및 무의미한 도메인 필터링
+    filtered_urls = []
+    seen = set()
+    
+    # 제외할 커뮤니티, SNS 및 기타 무의미한 도메인들
+    EXCLUDED_DOMAINS = [
+        "instagram.com", "facebook.com", "twitter.com", "x.com", "tiktok.com", 
+        "youtube.com", "youtu.be", "dcinside.com", "fmkorea.com", "ruliweb.com", 
+        "clien.net", "ppomppu.co.kr", "instiz.net", "inven.co.kr", "todayhumor.co.kr", 
+        "mlbpark.donga.com", "slrclub.com", "pann.nate.com", "bobaedream.co.kr", 
+        "theqoo.net", "instiz", "kakao.com", "naver.com/my", "nid.naver.com"
+    ]
+    
+    for url in urls:
+        # trailing 구두점 제거
+        url = url.rstrip('.,);:')
+        if url.startswith('www.'):
+            url = 'http://' + url
+            
+        if exclude_url and (exclude_url in url or url in exclude_url):
+            continue
+            
+        # 제외 대상 도메인 매칭
+        is_excluded = False
+        for domain in EXCLUDED_DOMAINS:
+            if domain in url:
+                is_excluded = True
+                break
+                
+        if is_excluded:
+            continue
+            
+        # naver.com의 경우 news.naver.com, n.news.naver.com 등 기사 링크만 허용하고 나머지는 필터링
+        if "naver.com" in url and "news.naver" not in url:
+            continue
+            
+        if url not in seen:
+            seen.add(url)
+            filtered_urls.append(url)
+            
+    return filtered_urls
+
 def translate_ko_to_en(text):
     """
     구글 번역 무료 웹 API를 이용해 한글 쿼리를 영어로 번역합니다.
@@ -986,6 +1040,26 @@ def check_url_validity(url, nll_model=None, nll_threshold=5.6):
         print(f"    - 수집된 신뢰 기사 개수: {len(sources)}개")
         for i, s in enumerate(sources):
             print(f"      ({i+1}) {s['title']} | {s['pubDate']}")
+            
+        # 본문 내에 인용된 외부 뉴스/정보 URL이 있으면 직접 크롤링하여 sources에 강제로 보강
+        extracted_urls = extract_news_urls_from_text(article['content'], exclude_url=url)
+        if extracted_urls:
+            print(f"    - 본문 내 인용 기사 URL 감지: {len(extracted_urls)}개")
+            for ext_url in extracted_urls[:2]:  # 대기 시간을 아끼기 위해 최대 2개만 수집
+                try:
+                    print(f"      - 인용 기사 직접 수집 및 보강 중: {ext_url}")
+                    ext_art = scrape_url_content(ext_url, timeout=3.5 if IS_SERVERLESS else 5.0)
+                    if ext_art and ext_art['content']:
+                        # sources 리스트 맨 앞에 보강하여 LLM 팩트체크 시 우선순위로 참고하게 만듦
+                        sources.insert(0, {
+                            "title": ext_art['title'],
+                            "link": ext_url,
+                            "description": ext_art['content'][:1000],  # 대조군으로 기사 앞부분 사용
+                            "pubDate": "본문 내 인용 뉴스"
+                        })
+                        print(f"        [★] 본문 내 기사 수집 성공: {ext_art['title']}")
+                except Exception as ext_err:
+                    print(f"      [-] 인용 기사 수집 실패: {ext_err}")
             
         print("\n[4] RAG-LLM 기반 상호 팩트체크 대조 분석 중...")
         content_label = sns_label or "기사"
