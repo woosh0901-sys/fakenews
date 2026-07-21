@@ -138,6 +138,37 @@ body {
     transform: translateY(0);
   }
 }
+.ticker-in {
+  animation: ticker-in 500ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 랜딩 최초 로딩 시 위로 떠오르는 플로팅 진입.
+   settle 곡선(cubic-bezier)으로 '떠서 자리를 잡는' 물리적 느낌을 준다. */
+@keyframes float-in {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.float-in {
+  opacity: 0;
+  animation: float-in 0.75s cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: transform, opacity;
+}
+
+/* 접근성: 모션 최소화 설정 시 이동(vestibular) 없이 크로스페이드로 대체 */
+@media (prefers-reduced-motion: reduce) {
+  .float-in { animation: fade-in 0.4s ease both; }
+  .ticker-in { animation: fade-in 0.4s ease; }
+}
 
 /* Custom scrollbars for details panel and layout */
 ::-webkit-scrollbar {
