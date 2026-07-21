@@ -191,10 +191,24 @@ body {
   transition: none;
 }
 
-/* 아래로 갈수록 사라지는 마스크 (Figma landing_loading) */
+/* 위아래 가장자리가 모두 사라지는 마스크 (Figma landing_loading)
+   - 위: 올라가서 빠져나가는 문단이 뚝 잘리지 않고 짧게 페이드아웃
+   - 아래: 아직 읽지 않은 본문이 길게 페이드인 (디자인 원안 유지) */
 .article-fade {
-  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 30%, transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 0%, #000 30%, transparent 100%);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    #000 13%,
+    #000 40%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    #000 13%,
+    #000 40%,
+    transparent 100%
+  );
 }
 
 /* 화면 전환 — 단순한 페이드 + 살짝 떠오르기 */
