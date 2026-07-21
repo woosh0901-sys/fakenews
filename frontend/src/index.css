@@ -180,15 +180,15 @@ body {
   animation: spin 900ms linear infinite;
 }
 
-/* 분석 로딩 — 기사 본문이 천천히 위로 흘러 '스캔되는' 느낌.
+/* 분석 로딩 — 기사 본문이 티커처럼 한 문단씩 딱딱 끊어 올라감.
    transform만 사용해 컴포지터에서 처리(§프레임 스무스니스) */
-@keyframes article-scan {
-  from { transform: translateY(0); }
-  to   { transform: translateY(-50%); }
-}
 .article-scan {
-  animation: article-scan 38s linear infinite;
+  transition: transform 380ms cubic-bezier(0.22, 1, 0.36, 1);
   will-change: transform;
+}
+/* 마지막 문단에서 처음으로 되감을 때는 전환 없이 순간 이동(문단이 중복돼 있어 이음매가 보이지 않음) */
+.article-scan.no-transition {
+  transition: none;
 }
 
 /* 아래로 갈수록 사라지는 마스크 (Figma landing_loading) */
@@ -211,8 +211,8 @@ body {
   .float-in { animation: fade-in 0.4s ease both; }
   .ticker-in { animation: fade-in 0.4s ease; }
   .view-in { animation: fade-in 0.3s ease both; }
-  /* 큰 면적이 계속 움직이는 스캔 효과는 정지 (스피너는 상태 표시라 유지하되 느리게) */
-  .article-scan { animation: none; }
+  /* 큰 면적이 움직이는 스캔 효과는 정지 (스피너는 상태 표시라 유지하되 느리게) */
+  .article-scan { transition: none; }
   .spin { animation: spin 1.8s linear infinite; }
 }
 

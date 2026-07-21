@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Shield, TrendingUp, Moon, Sun, ArrowRight, Loader2, CheckCircle } from "lucide-react";
 
 // 행별 페이드 감쇠 (피그마 디자인의 스택 페이드 재현)
@@ -42,6 +42,31 @@ export default function Landing({
     for (let i = 0; i < sentences.length; i += 2) out.push(sentences.slice(i, i + 2).join(" "));
     return out.slice(0, 24);
   }, [preview]);
+
+  // 기사 본문을 티커처럼 한 문단씩 끊어 올린다
+  const scanRef = useRef(null);
+  const [scanStep, setScanStep] = useState(0);
+  const [scanY, setScanY] = useState(0);
+
+  useEffect(() => {
+    if (!analyzing || analysisDone || paragraphs.length === 0) return;
+    const id = setInterval(() => setScanStep((s) => s + 1), 1700);
+    return () => clearInterval(id);
+  }, [analyzing, analysisDone, paragraphs.length]);
+
+  // 문단 높이가 제각각이므로 실제 offsetTop을 재서 정확히 한 문단씩 정렬
+  useEffect(() => {
+    const el = scanRef.current;
+    if (!el || paragraphs.length === 0) return;
+    const kids = el.children;
+    const idx = scanStep % paragraphs.length;
+    if (kids.length > idx) {
+      setScanY(kids[idx].offsetTop - kids[0].offsetTop);
+    }
+  }, [scanStep, paragraphs.length]);
+
+  // 되감기(0번으로 복귀) 프레임에서는 전환을 끊어 역주행이 보이지 않게 한다
+  const isRewind = paragraphs.length > 0 && scanStep % paragraphs.length === 0 && scanStep !== 0;
 
   // URL별 검증 횟수 상위 5건 (동률이면 최신순)
   const topArticles = useMemo(() => {
@@ -201,7 +226,11 @@ export default function Landing({
                   ))}
                 </div>
               ) : (
-                <div className="article-scan space-y-3.5">
+                <div
+                  ref={scanRef}
+                  className={`article-scan space-y-3.5 ${isRewind ? "no-transition" : ""}`}
+                  style={{ transform: `translateY(-${scanY}px)` }}
+                >
                   {[...paragraphs, ...paragraphs].map((p, i) => (
                     <p
                       key={i}
