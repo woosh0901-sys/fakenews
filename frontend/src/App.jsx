@@ -107,7 +107,11 @@ export default function App() {
   const loadRankings = async () => {
     try {
       const res = await axios.get(`${API_BASE_URL}/stats/rankings`);
-      setRankings(res.data);
+      // 응답 형태가 예상과 달라도(배열 누락 등) 렌더가 죽지 않도록 정규화
+      setRankings({
+        most_checked: Array.isArray(res.data?.most_checked) ? res.data.most_checked : [],
+        top_fakes: Array.isArray(res.data?.top_fakes) ? res.data.top_fakes : [],
+      });
     } catch (err) {
       console.error("랭킹 로드 실패:", err);
     }
@@ -120,8 +124,10 @@ export default function App() {
         axios.get(`${API_BASE_URL}/history`),
         axios.get(`${API_BASE_URL}/stats`)
       ]);
-      setHistory(historyRes.data);
-      setStats(statsRes.data);
+      setHistory(Array.isArray(historyRes.data) ? historyRes.data : []);
+      if (statsRes.data && typeof statsRes.data === "object") {
+        setStats((prev) => ({ ...prev, ...statsRes.data }));
+      }
       loadRankings();
     } catch (err) {
       console.error("데이터 로드 오류:", err);
@@ -148,8 +154,8 @@ export default function App() {
           axios.get(`${API_BASE_URL}/history/${selectedItem.id}/comments`),
           axios.get(`${API_BASE_URL}/history/${selectedItem.id}/reactions`)
         ]);
-        setComments(commentsRes.data);
-        setReactions(reactionsRes.data);
+        setComments(Array.isArray(commentsRes.data) ? commentsRes.data : []);
+        setReactions(Array.isArray(reactionsRes.data) ? reactionsRes.data : []);
         setChatHistory([]);
         
         // Load user's local reactions for this item
@@ -572,12 +578,17 @@ export default function App() {
         
         {/* Mobile Header */}
         <header className="lg:hidden flex justify-between items-center px-6 py-4 border-b border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 z-20">
-          <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setView("landing")}
+            title="메인 페이지로 이동"
+            className="flex items-center gap-2"
+          >
             <div className="p-1.5 bg-brand-500 rounded-md text-white">
               <Shield size={18} />
             </div>
             <span className="font-bold text-sm">Fake News Defender</span>
-          </div>
+          </button>
           <button 
             onClick={() => setDarkMode(!darkMode)}
             className="p-2 border border-neutral-200 dark:border-neutral-800 rounded-md hover:bg-neutral-100 dark:hover:bg-neutral-800"
@@ -684,31 +695,31 @@ export default function App() {
             <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
               
               {/* Most Checked Rankings */}
-              <div className="bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800/80 rounded-2xl p-5 shadow-sm space-y-4">
-                <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
-                  <TrendingUp size={16} className="text-blue-500" />
+              <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800/80 rounded-lg p-5 shadow-sm space-y-4">
+                <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
+                  <TrendingUp size={16} className="text-info-500 dark:text-info-400" />
                   실시간 가장 많이 검증된 기사 (Top 5)
                 </h3>
-                <div className="space-y-2.5">
-                  {rankings.most_checked.length === 0 ? (
-                    <p className="text-xs text-zinc-400 py-4 text-center">검증 통계가 없습니다.</p>
+                <div className="space-y-2">
+                  {(rankings.most_checked || []).length === 0 ? (
+                    <p className="text-xs text-neutral-400 py-4 text-center">검증 통계가 없습니다.</p>
                   ) : (
-                    rankings.most_checked.map((item, idx) => (
-                      <div 
+                    (rankings.most_checked || []).map((item, idx) => (
+                      <div
                         key={idx}
                         onClick={() => {
                           const matched = history.find(h => h.url === item.url);
                           if (matched) setSelectedItem(matched);
                         }}
-                        className="flex items-center justify-between text-xs p-3 bg-zinc-50/50 dark:bg-zinc-900/30 border border-zinc-100 dark:border-zinc-800/50 rounded-xl hover:border-zinc-300 dark:hover:border-zinc-700 cursor-pointer transition-all"
+                        className="flex items-center justify-between gap-3 text-xs p-3 bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200/60 dark:border-neutral-800 rounded-lg hover:border-info-500/40 dark:hover:border-info-400/40 cursor-pointer transition-colors"
                       >
                         <div className="flex items-center gap-3 min-w-0">
-                          <span className="font-mono font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/20 px-2 py-0.5 rounded text-[10px]">
+                          <span className="font-mono font-bold text-info-600 dark:text-info-400 bg-info-50 dark:bg-info-950/40 px-2 py-0.5 rounded text-[10px] shrink-0">
                             {idx + 1}
                           </span>
-                          <span className="font-bold text-zinc-900 dark:text-zinc-100 truncate flex-1 block leading-tight">{item.title}</span>
+                          <span className="font-bold text-neutral-900 dark:text-neutral-100 truncate flex-1 block leading-tight">{item.title}</span>
                         </div>
-                        <span className="text-[10px] text-zinc-400 shrink-0 font-bold bg-zinc-100 dark:bg-zinc-800/80 px-2 py-0.5 rounded-full">
+                        <span className="text-[10px] text-neutral-500 dark:text-neutral-400 shrink-0 font-bold bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 rounded-full">
                           {item.count}회
                         </span>
                       </div>
@@ -718,31 +729,31 @@ export default function App() {
               </div>
 
               {/* Top Fakes Rankings */}
-              <div className="bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800/80 rounded-2xl p-5 shadow-sm space-y-4">
-                <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
-                  <AlertTriangle size={16} className="text-rose-500" />
+              <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800/80 rounded-lg p-5 shadow-sm space-y-4">
+                <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
+                  <AlertTriangle size={16} className="text-error-500 dark:text-error-400" />
                   실시간 모순율이 가장 높은 거짓 기사 (Top 5)
                 </h3>
-                <div className="space-y-2.5">
-                  {rankings.top_fakes.length === 0 ? (
-                    <p className="text-xs text-zinc-400 py-4 text-center">검출된 거짓 기사가 없습니다.</p>
+                <div className="space-y-2">
+                  {(rankings.top_fakes || []).length === 0 ? (
+                    <p className="text-xs text-neutral-400 py-4 text-center">검출된 거짓 기사가 없습니다.</p>
                   ) : (
-                    rankings.top_fakes.map((item, idx) => (
-                      <div 
+                    (rankings.top_fakes || []).map((item, idx) => (
+                      <div
                         key={idx}
                         onClick={() => {
                           const matched = history.find(h => h.url === item.url);
                           if (matched) setSelectedItem(matched);
                         }}
-                        className="flex items-center justify-between text-xs p-3 bg-rose-50/10 dark:bg-rose-950/5 border border-rose-100/30 dark:border-rose-950/20 rounded-xl hover:border-zinc-300 dark:hover:border-zinc-700 cursor-pointer transition-all"
+                        className="flex items-center justify-between gap-3 text-xs p-3 bg-error-50/40 dark:bg-error-950/15 border border-error-500/15 dark:border-error-500/15 rounded-lg hover:border-error-500/40 dark:hover:border-error-400/40 cursor-pointer transition-colors"
                       >
                         <div className="flex items-center gap-3 min-w-0">
-                          <span className="font-mono font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/20 px-2 py-0.5 rounded text-[10px]">
+                          <span className="font-mono font-bold text-error-600 dark:text-error-400 bg-error-50 dark:bg-error-950/40 px-2 py-0.5 rounded text-[10px] shrink-0">
                             {idx + 1}
                           </span>
-                          <span className="font-bold text-zinc-900 dark:text-zinc-100 truncate flex-1 block leading-tight">{item.title}</span>
+                          <span className="font-bold text-neutral-900 dark:text-neutral-100 truncate flex-1 block leading-tight">{item.title}</span>
                         </div>
-                        <span className="text-[10px] text-rose-500 shrink-0 font-bold bg-rose-50 dark:bg-rose-950/30 px-2 py-0.5 rounded-full">
+                        <span className="text-[10px] text-error-600 dark:text-error-400 shrink-0 font-bold bg-error-50 dark:bg-error-950/40 px-2 py-0.5 rounded-full">
                           모순율 {(item.contradiction_score * 100).toFixed(0)}%
                         </span>
                       </div>
@@ -946,35 +957,35 @@ export default function App() {
                 {/* Claims Breakdown (진실/거짓 요소별 분류) */}
                 {selectedItem.claims_breakdown && selectedItem.claims_breakdown.length > 0 && (
                   <div className="space-y-3">
-                    <h4 className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest flex items-center gap-1.5">
-                      <Layers size={14} className="text-zinc-400" /> 요소별 세부 검증 (진실/거짓 분류)
+                    <h4 className="text-[10px] font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-widest flex items-center gap-1.5">
+                      <Layers size={14} className="text-neutral-400" /> 요소별 세부 검증 (진실/거짓 분류)
                     </h4>
                     <div className="space-y-2">
                       {selectedItem.claims_breakdown.map((item, idx) => {
                         const isTrue = item.truth === "진실";
                         const isFalse = item.truth === "거짓";
                         return (
-                          <div 
-                            key={idx} 
-                            className="bg-zinc-50 dark:bg-[#15151a] border border-zinc-200/60 dark:border-zinc-800 rounded-xl p-3.5 text-xs space-y-1.5 shadow-sm"
+                          <div
+                            key={idx}
+                            className="bg-neutral-50 dark:bg-neutral-800 border border-neutral-200/60 dark:border-neutral-800 rounded-lg p-3.5 text-xs space-y-1.5 shadow-sm"
                           >
                             <div className="flex items-center gap-2">
                               {isTrue ? (
-                                <span className="flex items-center gap-1 text-[10px] bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-200/60 dark:border-emerald-950/30 px-2 py-0.5 rounded-full shrink-0">
+                                <span className="flex items-center gap-1 text-[10px] bg-success-50 dark:bg-success-950/40 text-success-700 dark:text-success-400 font-bold border border-success-500/25 px-2 py-0.5 rounded-full shrink-0">
                                   <Check size={10} /> {item.truth}
                                 </span>
                               ) : isFalse ? (
-                                <span className="flex items-center gap-1 text-[10px] bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 font-bold border border-rose-200/60 dark:border-rose-950/30 px-2 py-0.5 rounded-full shrink-0">
+                                <span className="flex items-center gap-1 text-[10px] bg-error-50 dark:bg-error-950/40 text-error-600 dark:text-error-400 font-bold border border-error-500/25 px-2 py-0.5 rounded-full shrink-0">
                                   <X size={10} /> {item.truth}
                                 </span>
                               ) : (
-                                <span className="flex items-center gap-1 text-[10px] bg-amber-50 dark:bg-amber-950/20 text-amber-600 dark:text-amber-400 font-bold border border-amber-200/60 dark:border-amber-950/30 px-2 py-0.5 rounded-full shrink-0">
+                                <span className="flex items-center gap-1 text-[10px] bg-warning-50 dark:bg-warning-950/40 text-warning-700 dark:text-warning-400 font-bold border border-warning-500/25 px-2 py-0.5 rounded-full shrink-0">
                                   <AlertCircle size={10} /> {item.truth}
                                 </span>
                               )}
-                              <h5 className="font-bold text-zinc-950 dark:text-zinc-100 leading-tight flex-1">{item.claim}</h5>
+                              <h5 className="font-bold text-neutral-950 dark:text-neutral-100 leading-tight flex-1">{item.claim}</h5>
                             </div>
-                            <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed font-medium pl-1">{item.explanation}</p>
+                            <p className="text-[11px] text-neutral-500 dark:text-neutral-400 leading-relaxed font-medium pl-1">{item.explanation}</p>
                           </div>
                         );
                       })}
@@ -983,27 +994,27 @@ export default function App() {
                 )}
 
                 {/* Q&A Interactive Deep Analysis */}
-                <div className="space-y-3 pt-2 border-t border-zinc-100 dark:border-zinc-800/80">
-                  <h4 className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest flex items-center gap-1.5">
-                    <HelpCircle size={14} className="text-zinc-400" /> 심층 질문 및 추가 검증
+                <div className="space-y-3 pt-2 border-t border-neutral-100 dark:border-neutral-800/80">
+                  <h4 className="text-[10px] font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-widest flex items-center gap-1.5">
+                    <HelpCircle size={14} className="text-neutral-400" /> 심층 질문 및 추가 검증
                   </h4>
-                  
+
                   {/* Chat logs */}
                   <div className="space-y-2.5 max-h-[220px] overflow-y-auto pr-1">
                     {chatHistory.length === 0 ? (
-                      <p className="text-[11px] text-zinc-400/80 italic font-medium pl-1">이 기사에서 더 알고 싶은 사실이 있다면 아래에 질문해 보세요. (예: &quot;진짜 벨기에로 전투기 출격했나?&quot;)</p>
+                      <p className="text-[11px] text-neutral-400 italic font-medium pl-1">이 기사에서 더 알고 싶은 사실이 있다면 아래에 질문해 보세요. (예: &quot;진짜 벨기에로 전투기 출격했나?&quot;)</p>
                     ) : (
                       chatHistory.map((chat, idx) => (
                         <div key={idx} className="space-y-1.5">
                           <div className="flex justify-end">
-                            <span className="bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 px-3 py-1.5 rounded-2xl rounded-tr-none text-xs font-bold shadow-sm max-w-[85%]">
+                            <span className="bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 px-3 py-1.5 rounded-2xl rounded-tr-none text-xs font-bold shadow-sm max-w-[85%]">
                               {chat.query}
                             </span>
                           </div>
                           <div className="flex justify-start">
-                            <div className="bg-blue-50/50 dark:bg-blue-950/10 border border-blue-100/30 dark:border-blue-950/20 text-zinc-800 dark:text-zinc-200 px-3 py-2 rounded-2xl rounded-tl-none text-xs font-semibold shadow-sm max-w-[85%] leading-relaxed">
+                            <div className="bg-info-50/60 dark:bg-info-950/30 border border-info-500/20 dark:border-info-500/20 text-neutral-800 dark:text-neutral-200 px-3 py-2 rounded-2xl rounded-tl-none text-xs font-semibold shadow-sm max-w-[85%] leading-relaxed">
                               {chat.loading ? (
-                                <span className="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400 font-bold">
+                                <span className="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400 font-bold">
                                   <Loader2 size={12} className="animate-spin" /> 실시간 보도 검색 및 AI 분석 중...
                                 </span>
                               ) : (
@@ -1018,18 +1029,18 @@ export default function App() {
 
                   {/* Chat input */}
                   <form onSubmit={handleChatSubmit} className="flex gap-2">
-                    <input 
+                    <input
                       type="text"
                       value={chatInput}
                       onChange={(e) => setChatInput(e.target.value)}
                       placeholder="추가 질문을 입력해 주세요..."
                       disabled={loadingChat}
-                      className="flex-1 bg-zinc-50 dark:bg-[#15151a] border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-zinc-900 dark:text-zinc-100"
+                      className="flex-1 bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-800 rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 dark:focus:ring-brand-400/30 dark:focus:border-brand-400 text-neutral-900 dark:text-neutral-100"
                     />
-                    <button 
+                    <button
                       type="submit"
                       disabled={loadingChat || !chatInput.trim()}
-                      className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl p-2 shrink-0 disabled:opacity-40 flex items-center justify-center"
+                      className="bg-brand-500 hover:bg-brand-600 active:bg-brand-700 text-white rounded-md p-2 shrink-0 disabled:opacity-40 flex items-center justify-center transition-colors"
                     >
                       <Send size={14} />
                     </button>
@@ -1037,8 +1048,8 @@ export default function App() {
                 </div>
 
                 {/* Emoji Reactions */}
-                <div className="space-y-3 pt-2 border-t border-zinc-100 dark:border-zinc-800/80">
-                  <h4 className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">
+                <div className="space-y-3 pt-2 border-t border-neutral-100 dark:border-neutral-800/80">
+                  <h4 className="text-[10px] font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-widest">
                     리액션 남기기
                   </h4>
                   <div className="flex gap-2.5">
@@ -1046,17 +1057,17 @@ export default function App() {
                       const reaction = reactions.find(r => r.emoji === emoji);
                       const isReacted = !!userReactions[emoji];
                       return (
-                        <button 
+                        <button
                           key={emoji}
                           onClick={() => handleAddReaction(emoji)}
-                          className={`flex items-center gap-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-850 border rounded-xl px-3.5 py-1.5 text-xs font-bold transition-all shadow-sm active:scale-95 ${
-                            isReacted 
-                              ? "bg-blue-50/50 dark:bg-blue-950/20 border-blue-500/50 dark:border-blue-500/40 text-blue-600 dark:text-blue-400" 
-                              : "bg-zinc-50 dark:bg-[#15151a] border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100"
+                          className={`flex items-center gap-1.5 border rounded-md px-3.5 py-1.5 text-xs font-bold transition-all shadow-sm active:scale-95 ${
+                            isReacted
+                              ? "bg-brand-50 dark:bg-brand-900/40 border-brand-500/50 dark:border-brand-400/40 text-brand-600 dark:text-brand-300"
+                              : "bg-neutral-50 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-700"
                           }`}
                         >
                           <span>{emoji}</span>
-                          <span className={`font-mono text-[10px] ${isReacted ? "text-blue-500" : "text-zinc-400"}`}>
+                          <span className={`font-mono text-[10px] ${isReacted ? "text-brand-500 dark:text-brand-300" : "text-neutral-400"}`}>
                             {reaction ? reaction.count : 0}
                           </span>
                         </button>
@@ -1066,29 +1077,29 @@ export default function App() {
                 </div>
 
                 {/* Community Comments */}
-                <div className="space-y-3 pt-2 border-t border-zinc-100 dark:border-zinc-800/80">
-                  <h4 className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest flex items-center gap-1.5">
-                    <MessageSquare size={14} className="text-zinc-400" /> 댓글 모음 ({comments.length}건)
+                <div className="space-y-3 pt-2 border-t border-neutral-100 dark:border-neutral-800/80">
+                  <h4 className="text-[10px] font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-widest flex items-center gap-1.5">
+                    <MessageSquare size={14} className="text-neutral-400" /> 댓글 모음 ({comments.length}건)
                   </h4>
-                  
+
                   {/* Comments list */}
                   <div className="space-y-2 max-h-[200px] overflow-y-auto pr-1">
                     {comments.length === 0 ? (
-                      <p className="text-[11px] text-zinc-400 italic pl-1">첫 댓글을 작성해 보세요!</p>
+                      <p className="text-[11px] text-neutral-400 italic pl-1">첫 댓글을 작성해 보세요!</p>
                     ) : (
                       comments.map((comment, index) => (
-                        <div 
+                        <div
                           key={index}
-                          className="bg-zinc-50 dark:bg-[#15151a] border border-zinc-200/60 dark:border-zinc-800 rounded-xl p-3 text-xs space-y-1"
+                          className="bg-neutral-50 dark:bg-neutral-800 border border-neutral-200/60 dark:border-neutral-800 rounded-lg p-3 text-xs space-y-1"
                         >
-                          <div className="flex justify-between items-center text-[10px] font-bold text-zinc-400">
+                          <div className="flex justify-between items-center text-[10px] font-bold text-neutral-400">
                             <span>👤 {comment.author}</span>
                             <div className="flex items-center gap-2">
                               <span className="font-mono font-medium text-[9px]">{new Date(comment.created_at).toLocaleDateString()}</span>
                               {(comment.user_token === userToken || !comment.user_token) && (
-                                <button 
+                                <button
                                   onClick={() => handleDeleteComment(comment.id)}
-                                  className="text-zinc-400 hover:text-rose-500 p-0.5 rounded transition-colors"
+                                  className="text-neutral-400 hover:text-error-500 p-0.5 rounded transition-colors"
                                   title="댓글 삭제"
                                 >
                                   <X size={12} />
@@ -1096,7 +1107,7 @@ export default function App() {
                               )}
                             </div>
                           </div>
-                          <p className="text-zinc-700 dark:text-zinc-300 leading-normal pl-0.5">{comment.content}</p>
+                          <p className="text-neutral-700 dark:text-neutral-300 leading-normal pl-0.5">{comment.content}</p>
                         </div>
                       ))
                     )}
@@ -1105,27 +1116,27 @@ export default function App() {
                   {/* Comment inputs */}
                   <form onSubmit={handleAddComment} className="space-y-2">
                     <div className="flex gap-2">
-                      <input 
+                      <input
                         type="text"
                         value={commentAuthor}
                         onChange={(e) => setCommentAuthor(e.target.value)}
                         placeholder="이름 (익명)"
                         maxLength="15"
-                        className="w-1/3 bg-zinc-50 dark:bg-[#15151a] border border-zinc-200 dark:border-zinc-800 rounded-xl px-2.5 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-zinc-900 dark:text-zinc-100"
+                        className="w-1/3 bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-800 rounded-md px-2.5 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 dark:focus:ring-brand-400/30 dark:focus:border-brand-400 text-neutral-900 dark:text-neutral-100"
                       />
-                      <input 
+                      <input
                         type="text"
                         value={commentContent}
                         onChange={(e) => setCommentContent(e.target.value)}
                         placeholder="공동 팩트체크를 위한 댓글을 적어주세요..."
                         required
-                        className="flex-1 bg-zinc-50 dark:bg-[#15151a] border border-zinc-200 dark:border-zinc-800 rounded-xl px-2.5 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-zinc-900 dark:text-zinc-100"
+                        className="flex-1 bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-800 rounded-md px-2.5 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 dark:focus:ring-brand-400/30 dark:focus:border-brand-400 text-neutral-900 dark:text-neutral-100"
                       />
                     </div>
-                    <button 
+                    <button
                       type="submit"
                       disabled={!commentContent.trim()}
-                      className="w-full bg-zinc-900 hover:bg-zinc-850 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 font-bold text-xs py-2 rounded-xl transition-all shadow-sm disabled:opacity-40"
+                      className="w-full bg-brand-500 hover:bg-brand-600 active:bg-brand-700 text-white font-bold text-xs py-2 rounded-md transition-all shadow-sm disabled:opacity-40"
                     >
                       댓글 등록
                     </button>

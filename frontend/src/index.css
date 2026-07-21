@@ -120,6 +120,14 @@
   --shadow-xl: 0px 8px 8px -4px #0F172A1A, 0px 20px 24px -4px #0F172A24;
 }
 
+/* 스크롤 컨테이너 오버스크롤/여백에서 흰 바탕이 비치지 않도록 루트에 배경 고정 */
+html {
+  background-color: var(--color-neutral-50);
+}
+html.dark {
+  background-color: var(--color-neutral-950);
+}
+
 body {
   margin: 0;
   font-family: var(--font-sans);
