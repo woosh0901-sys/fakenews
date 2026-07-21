@@ -1,10 +1,11 @@
 import os
 import sys
-import requests
+import httpx
+from typing import List, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
-from typing import List, Optional
 
 # Import our NLL RAG pipeline and credentials
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -48,6 +49,37 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/api/debug/env")
+async def debug_env():
+    """Temporary debug endpoint to verify environment variables are loaded."""
+    from fact_checker_by_url import GEMINI_API_KEY as gkey
+    return {
+        "GEMINI_API_KEY": f"{gkey[:6]}...{gkey[-4:]}" if gkey and len(gkey) > 10 else f"EMPTY_OR_SHORT(len={len(gkey) if gkey else 0})",
+        "NAVER_CLIENT_ID": bool(NAVER_CLIENT_ID if 'NAVER_CLIENT_ID' in dir() else os.environ.get("NAVER_CLIENT_ID")),
+        "SUPABASE_URL": SUPABASE_URL[:30] + "..." if SUPABASE_URL and len(SUPABASE_URL) > 30 else str(SUPABASE_URL),
+        "SUPABASE_ENABLED": SUPABASE_ENABLED,
+        "IS_VERCEL": bool(os.environ.get("VERCEL")),
+    }
+
+@app.get("/api/debug/gemini")
+async def debug_gemini():
+    """Temporary debug endpoint to test actual Gemini API call."""
+    import requests as req
+    from fact_checker_by_url import GEMINI_API_KEY as gkey
+    if not gkey:
+        return {"error": "GEMINI_API_KEY is empty"}
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gkey.strip()}"
+        payload = {"contents": [{"parts": [{"text": "Say hello in Korean, one sentence only."}]}]}
+        resp = req.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=15)
+        return {
+            "status_code": resp.status_code,
+            "response_body": resp.json() if resp.status_code == 200 else resp.text[:500],
+            "success": resp.status_code == 200
+        }
+    except Exception as e:
+        return {"error": str(e), "type": type(e).__name__}
+
 # Helper function to get Supabase API headers
 def get_supabase_headers():
     return {
@@ -60,6 +92,18 @@ def get_supabase_headers():
 class CheckRequest(BaseModel):
     url: str
 
+class QueryRequest(BaseModel):
+    query: str
+
+class CommentRequest(BaseModel):
+    author: str
+    content: str
+    user_token: Optional[str] = None
+
+class ReactionRequest(BaseModel):
+    emoji: str
+    is_canceling: Optional[bool] = False
+
 @app.post("/api/check")
 async def check_url(payload: CheckRequest):
     url = payload.url.strip()
@@ -67,16 +111,15 @@ async def check_url(payload: CheckRequest):
         raise HTTPException(status_code=400, detail="올바른 HTTP/HTTPS URL 형식을 입력해 주세요.")
         
     try:
-        # Lazy load NLL model
-        nll_model, nll_threshold = get_nll_model_lazy()
+        # Lazy load NLL model in thread pool
+        nll_model, nll_threshold = await run_in_threadpool(get_nll_model_lazy)
         
-        # Run the hybrid detection pipeline
-        result = check_url_validity(url, nll_model, nll_threshold)
+        # Run the hybrid detection pipeline in a separate thread pool to prevent event loop blocking
+        result = await run_in_threadpool(check_url_validity, url, nll_model, nll_threshold)
         if not result:
             raise HTTPException(status_code=500, detail="기사 본문 크롤링에 실패했거나 올바르지 않은 페이지입니다.")
             
-        # Store result in Supabase Database via REST API.
-        # 저장 실패는 분석 결과 자체를 무효화하지 않도록 fail-soft로 처리합니다.
+        # Store result in Supabase Database via REST API asynchronously.
         result['id'] = None
         if SUPABASE_ENABLED:
             try:
@@ -95,38 +138,39 @@ async def check_url(payload: CheckRequest):
                 if 'claims_breakdown' in result:
                     check_data['claims_breakdown'] = result['claims_breakdown']
 
-                resp = requests.post(f"{SUPABASE_URL}/rest/v1/checks", headers=headers, json=check_data)
-                if resp.status_code != 201:
-                    # Fallback: if 'claims_breakdown' column doesn't exist yet in checks table, retry without it
-                    if 'claims_breakdown' in check_data:
-                        print("[!] Warning: 'claims_breakdown' column might be missing. Retrying insert without it...")
-                        del check_data['claims_breakdown']
-                        resp = requests.post(f"{SUPABASE_URL}/rest/v1/checks", headers=headers, json=check_data)
-                        if resp.status_code != 201:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.post(f"{SUPABASE_URL}/rest/v1/checks", headers=headers, json=check_data)
+                    if resp.status_code != 201:
+                        # Fallback: if 'claims_breakdown' column doesn't exist yet in checks table, retry without it
+                        if 'claims_breakdown' in check_data:
+                            print("[!] Warning: 'claims_breakdown' column might be missing. Retrying insert without it...")
+                            del check_data['claims_breakdown']
+                            resp = await client.post(f"{SUPABASE_URL}/rest/v1/checks", headers=headers, json=check_data)
+                            if resp.status_code != 201:
+                                raise Exception(f"Supabase checks 저장 실패 (HTTP {resp.status_code}): {resp.text}")
+                        else:
                             raise Exception(f"Supabase checks 저장 실패 (HTTP {resp.status_code}): {resp.text}")
-                    else:
-                        raise Exception(f"Supabase checks 저장 실패 (HTTP {resp.status_code}): {resp.text}")
 
-                inserted_check = resp.json()[0]
-                check_id = inserted_check['id']
+                    inserted_check = resp.json()[0]
+                    check_id = inserted_check['id']
 
-                # Insert references if present (Stage 2)
-                ref_data = []
-                for s in result.get('sources', []):
-                    ref_data.append({
-                        "check_id": check_id,
-                        "title": s['title'],
-                        "link": s['link'],
-                        "description": s['description'],
-                        "pub_date": s['pubDate']
-                    })
+                    # Insert references if present (Stage 2)
+                    ref_data = []
+                    for s in result.get('sources', []):
+                        ref_data.append({
+                            "check_id": check_id,
+                            "title": s['title'],
+                            "link": s['link'],
+                            "description": s['description'],
+                            "pub_date": s['pubDate']
+                        })
 
-                if ref_data:
-                    resp_ref = requests.post(f"{SUPABASE_URL}/rest/v1/check_references", headers=headers, json=ref_data)
-                    if resp_ref.status_code != 201:
-                        raise Exception(f"Supabase check_references 저장 실패 (HTTP {resp_ref.status_code}): {resp_ref.text}")
+                    if ref_data:
+                        resp_ref = await client.post(f"{SUPABASE_URL}/rest/v1/check_references", headers=headers, json=ref_data)
+                        if resp_ref.status_code != 201:
+                            raise Exception(f"Supabase check_references 저장 실패 (HTTP {resp_ref.status_code}): {resp_ref.text}")
 
-                result['id'] = check_id
+                    result['id'] = check_id
             except Exception as db_err:
                 print(f"[-] 검사 결과 저장 실패 (분석 결과는 정상 반환): {db_err}")
                 result['warning'] = f"검사는 완료되었지만 결과를 데이터베이스에 저장하지 못했습니다. (오류: {str(db_err)})"
@@ -148,11 +192,11 @@ async def get_history():
         headers = get_supabase_headers()
         # Fetch checks joining with check_references as 'sources' sorting by created_at desc
         url = f"{SUPABASE_URL}/rest/v1/checks?select=*,sources:check_references(*)&order=created_at.desc"
-        resp = requests.get(url, headers=headers)
-        if resp.status_code != 200:
-            raise Exception(f"Supabase history 조회 실패 (HTTP {resp.status_code}): {resp.text}")
-            
-        return resp.json()
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code != 200:
+                raise Exception(f"Supabase history 조회 실패 (HTTP {resp.status_code}): {resp.text}")
+            return resp.json()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"히스토리 조회 실패: {str(e)}")
 
@@ -163,11 +207,11 @@ async def delete_history_item(check_id: int):
     try:
         headers = get_supabase_headers()
         url = f"{SUPABASE_URL}/rest/v1/checks?id=eq.{check_id}"
-        resp = requests.delete(url, headers=headers)
-        if resp.status_code not in (200, 204):
-            raise Exception(f"Supabase 삭제 실패 (HTTP {resp.status_code}): {resp.text}")
-            
-        return {"status": "success", "message": "성공적으로 삭제되었습니다."}
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.delete(url, headers=headers)
+            if resp.status_code not in (200, 204):
+                raise Exception(f"Supabase 삭제 실패 (HTTP {resp.status_code}): {resp.text}")
+            return {"status": "success", "message": "성공적으로 삭제되었습니다."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"삭제 실패: {str(e)}")
 
@@ -184,72 +228,58 @@ async def get_stats():
         }
     try:
         headers = get_supabase_headers()
-        # Query only the columns needed to calculate statistics (saves bandwidth)
         url = f"{SUPABASE_URL}/rest/v1/checks?select=verdict,nll_loss,contradiction_score"
-        resp = requests.get(url, headers=headers)
-        if resp.status_code != 200:
-            raise Exception(f"Supabase stats 조회 실패 (HTTP {resp.status_code}): {resp.text}")
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code != 200:
+                raise Exception(f"Supabase stats 조회 실패 (HTTP {resp.status_code}): {resp.text}")
             
-        rows = resp.json()
-        total_checks = len(rows)
-        
-        if total_checks == 0:
+            rows = resp.json()
+            total_checks = len(rows)
+            
+            if total_checks == 0:
+                return {
+                    "total_checks": 0,
+                    "real_count": 0,
+                    "fake_count": 0,
+                    "suspicious_count": 0,
+                    "avg_nll": 0.0,
+                    "avg_contradiction_score": 0.0
+                }
+                
+            real_count = 0
+            fake_count = 0
+            suspicious_count = 0
+            total_nll = 0.0
+            nll_count = 0
+            total_score = 0.0
+            
+            for row in rows:
+                verdict = row.get("verdict")
+                if verdict == "REAL":
+                    real_count += 1
+                elif verdict == "FAKE":
+                    fake_count += 1
+                else:
+                    suspicious_count += 1
+                    
+                nll = row.get("nll_loss")
+                if nll is not None:
+                    total_nll += float(nll)
+                    nll_count += 1
+                    
+                total_score += float(row.get("contradiction_score") or 0.0)
+                
             return {
-                "total_checks": 0,
-                "real_count": 0,
-                "fake_count": 0,
-                "suspicious_count": 0,
-                "avg_nll": 0.0,
-                "avg_contradiction_score": 0.0
+                "total_checks": total_checks,
+                "real_count": real_count,
+                "fake_count": fake_count,
+                "suspicious_count": suspicious_count,
+                "avg_nll": round(total_nll / nll_count, 4) if nll_count > 0 else 0.0,
+                "avg_contradiction_score": round(total_score / total_checks, 4)
             }
-            
-        real_count = 0
-        fake_count = 0
-        suspicious_count = 0
-        total_nll = 0.0
-        nll_count = 0
-        total_score = 0.0
-        
-        for row in rows:
-            verdict = row.get("verdict")
-            if verdict == "REAL":
-                real_count += 1
-            elif verdict == "FAKE":
-                fake_count += 1
-            else:
-                suspicious_count += 1
-                
-            nll = row.get("nll_loss")
-            if nll is not None:
-                total_nll += float(nll)
-                nll_count += 1
-                
-            total_score += float(row.get("contradiction_score") or 0.0)
-            
-        return {
-            "total_checks": total_checks,
-            "real_count": real_count,
-            "fake_count": fake_count,
-            "suspicious_count": suspicious_count,
-            "avg_nll": round(total_nll / nll_count, 4) if nll_count > 0 else 0.0,
-            "avg_contradiction_score": round(total_score / total_checks, 4)
-        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"통계 계산 실패: {str(e)}")
-
-# --- 추가 기능 API 엔드포인트 ---
-
-class QueryRequest(BaseModel):
-    query: str
-
-class CommentRequest(BaseModel):
-    author: str
-    content: str
-    user_token: Optional[str] = None
-
-class ReactionRequest(BaseModel):
-    emoji: str
-    is_canceling: Optional[bool] = False
 
 @app.get("/api/stats/rankings")
 async def get_rankings():
@@ -257,16 +287,13 @@ async def get_rankings():
         return {"most_checked": [], "top_fakes": []}
     try:
         headers = get_supabase_headers()
-        
-        # 1. Fetch checks
         url = f"{SUPABASE_URL}/rest/v1/checks?select=url,title,verdict,contradiction_score,created_at"
-        resp = requests.get(url, headers=headers)
-        if resp.status_code != 200:
-            raise Exception(f"Supabase checks 조회 실패 (HTTP {resp.status_code}): {resp.text}")
-            
-        rows = resp.json()
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code != 200:
+                raise Exception(f"Supabase checks 조회 실패 (HTTP {resp.status_code}): {resp.text}")
+            rows = resp.json()
         
-        # Calculate most checked URLs
         from collections import Counter
         url_counts = Counter()
         url_titles = {}
@@ -284,7 +311,6 @@ async def get_rankings():
                 "count": count
             })
             
-        # Calculate top fakes
         fakes = [r for r in rows if r['verdict'] in ('FAKE', 'SUSPICIOUS')]
         fakes.sort(key=lambda x: x['contradiction_score'], reverse=True)
         
@@ -320,24 +346,21 @@ async def query_check(check_id: int, payload: QueryRequest):
         
     try:
         headers = get_supabase_headers()
-        
-        # 1. Fetch check info
         url = f"{SUPABASE_URL}/rest/v1/checks?id=eq.{check_id}"
-        resp = requests.get(url, headers=headers)
-        if resp.status_code != 200 or not resp.json():
-            raise HTTPException(status_code=404, detail="해당 검사 기사를 찾을 수 없습니다.")
-        check_item = resp.json()[0]
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code != 200 or not resp.json():
+                raise HTTPException(status_code=404, detail="해당 검사 기사를 찾을 수 없습니다.")
+            check_item = resp.json()[0]
         
-        # 2. Run real-time hybrid search for the query
         from fact_checker_by_url import fetch_hybrid_news
         print(f"[*] 추가 분석 실시간 웹 검색 실행 중: {user_query}")
-        sources = fetch_hybrid_news(user_query, display_count=5)
+        sources = await run_in_threadpool(fetch_hybrid_news, user_query, 5)
         
         sources_text = ""
         for i, s in enumerate(sources):
             sources_text += f"[참고 자료 {i+1}]\n제목: {s['title']}\n내용 요약: {s['description']}\n링크: {s['link']}\n\n"
             
-        # 3. Build Gemini prompt
         from datetime import datetime
         current_date = datetime.now().strftime("%Y년 %m월 %d일")
         
@@ -360,12 +383,11 @@ async def query_check(check_id: int, payload: QueryRequest):
         )
         
         from fact_checker_by_url import GEMINI_API_KEY, call_gemini_api
-        
         answer = "LLM 연동이 되어 있지 않아 추가 질문에 대한 분석을 진행할 수 없습니다."
         
         if GEMINI_API_KEY and GEMINI_API_KEY.strip() and GEMINI_API_KEY.strip() != "YOUR_GEMINI_API_KEY":
             try:
-                output = call_gemini_api(prompt)
+                output = await run_in_threadpool(call_gemini_api, prompt)
                 if output:
                     answer = output
                 else:
@@ -392,16 +414,14 @@ async def chat_general(payload: QueryRequest):
         raise HTTPException(status_code=400, detail="질문 내용을 입력해 주세요.")
         
     try:
-        # Run real-time hybrid search for the general query
         from fact_checker_by_url import fetch_hybrid_news
         print(f"[*] AI 팩트체커 자유 질문 실시간 웹 검색 실행 중: {user_query}")
-        sources = fetch_hybrid_news(user_query, display_count=5)
+        sources = await run_in_threadpool(fetch_hybrid_news, user_query, 5)
         
         sources_text = ""
         for i, s in enumerate(sources):
             sources_text += f"[참고 자료 {i+1}]\n제목: {s['title']}\n내용 요약: {s['description']}\n링크: {s['link']}\n\n"
             
-        # Build Gemini prompt
         from datetime import datetime
         current_date = datetime.now().strftime("%Y년 %m월 %d일")
         
@@ -421,12 +441,11 @@ async def chat_general(payload: QueryRequest):
         )
         
         from fact_checker_by_url import GEMINI_API_KEY, call_gemini_api
-        
         answer = "LLM 연동이 되어 있지 않아 팩트체크 대화 분석을 진행할 수 없습니다."
         
         if GEMINI_API_KEY and GEMINI_API_KEY.strip() and GEMINI_API_KEY.strip() != "YOUR_GEMINI_API_KEY":
             try:
-                output = call_gemini_api(prompt)
+                output = await run_in_threadpool(call_gemini_api, prompt)
                 if output:
                     answer = output
                 else:
@@ -453,10 +472,11 @@ async def get_comments(check_id: int):
     try:
         headers = get_supabase_headers()
         url = f"{SUPABASE_URL}/rest/v1/check_comments?check_id=eq.{check_id}&order=created_at.asc"
-        resp = requests.get(url, headers=headers)
-        if resp.status_code != 200:
-            raise Exception(f"Supabase 댓글 조회 실패 (HTTP {resp.status_code}): {resp.text}")
-        return resp.json()
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code != 200:
+                raise Exception(f"Supabase 댓글 조회 실패 (HTTP {resp.status_code}): {resp.text}")
+            return resp.json()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"댓글 조회 실패: {str(e)}")
 
@@ -479,10 +499,11 @@ async def add_comment(check_id: int, payload: CommentRequest):
             "content": content,
             "user_token": user_token
         }
-        resp = requests.post(f"{SUPABASE_URL}/rest/v1/check_comments", headers=headers, json=comment_data)
-        if resp.status_code != 201:
-            raise Exception(f"Supabase 댓글 저장 실패 (HTTP {resp.status_code}): {resp.text}")
-        return resp.json()[0]
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(f"{SUPABASE_URL}/rest/v1/check_comments", headers=headers, json=comment_data)
+            if resp.status_code != 201:
+                raise Exception(f"Supabase 댓글 저장 실패 (HTTP {resp.status_code}): {resp.text}")
+            return resp.json()[0]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"댓글 저장 실패: {str(e)}")
 
@@ -493,27 +514,24 @@ async def delete_comment(check_id: int, comment_id: int, user_token: str):
         
     try:
         headers = get_supabase_headers()
-        
-        # 1. Fetch the comment to verify ownership
         url = f"{SUPABASE_URL}/rest/v1/check_comments?id=eq.{comment_id}"
-        resp_get = requests.get(url, headers=headers)
-        if resp_get.status_code != 200 or not resp_get.json():
-            raise HTTPException(status_code=404, detail="댓글을 찾을 수 없거나 이미 삭제되었습니다.")
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp_get = await client.get(url, headers=headers)
+            if resp_get.status_code != 200 or not resp_get.json():
+                raise HTTPException(status_code=404, detail="댓글을 찾을 수 없거나 이미 삭제되었습니다.")
+                
+            comment = resp_get.json()[0]
+            db_token = comment.get("user_token")
             
-        comment = resp_get.json()[0]
-        db_token = comment.get("user_token")
-        
-        # Allow deletion if tokens match, or if db_token is empty (fallback for legacy comments)
-        if db_token and db_token != user_token:
-            raise HTTPException(status_code=403, detail="본인이 작성한 댓글만 삭제할 수 있습니다.")
-            
-        # 2. Delete from database
-        del_url = f"{SUPABASE_URL}/rest/v1/check_comments?id=eq.{comment_id}"
-        resp_del = requests.delete(del_url, headers=headers)
-        if resp_del.status_code not in (200, 204):
-            raise Exception(f"Supabase 댓글 삭제 실패 (HTTP {resp_del.status_code}): {resp_del.text}")
-            
-        return {"status": "success", "message": "댓글이 삭제되었습니다."}
+            if db_token and db_token != user_token:
+                raise HTTPException(status_code=403, detail="본인이 작성한 댓글만 삭제할 수 있습니다.")
+                
+            del_url = f"{SUPABASE_URL}/rest/v1/check_comments?id=eq.{comment_id}"
+            resp_del = await client.delete(del_url, headers=headers)
+            if resp_del.status_code not in (200, 204):
+                raise Exception(f"Supabase 댓글 삭제 실패 (HTTP {resp_del.status_code}): {resp_del.text}")
+                
+            return {"status": "success", "message": "댓글이 삭제되었습니다."}
     except HTTPException as he:
         raise he
     except Exception as e:
@@ -526,10 +544,11 @@ async def get_reactions(check_id: int):
     try:
         headers = get_supabase_headers()
         url = f"{SUPABASE_URL}/rest/v1/check_reactions?check_id=eq.{check_id}"
-        resp = requests.get(url, headers=headers)
-        if resp.status_code != 200:
-            raise Exception(f"Supabase 리액션 조회 실패 (HTTP {resp.status_code}): {resp.text}")
-        return resp.json()
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code != 200:
+                raise Exception(f"Supabase 리액션 조회 실패 (HTTP {resp.status_code}): {resp.text}")
+            return resp.json()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"리액션 조회 실패: {str(e)}")
 
@@ -545,63 +564,54 @@ async def add_reaction(check_id: int, payload: ReactionRequest):
         
     try:
         headers = get_supabase_headers()
-        
-        # 1. Fetch existing reaction
         url = f"{SUPABASE_URL}/rest/v1/check_reactions?check_id=eq.{check_id}&emoji=eq.{emoji}"
-        resp_get = requests.get(url, headers=headers)
-        
-        if resp_get.status_code == 200 and resp_get.json():
-            existing = resp_get.json()[0]
-            if is_canceling:
-                # Decrement count
-                new_count = int(existing['count']) - 1
-                if new_count <= 0:
-                    # Delete the reaction row if count falls to 0
-                    del_url = f"{SUPABASE_URL}/rest/v1/check_reactions?id=eq.{existing['id']}"
-                    resp_del = requests.delete(del_url, headers=headers)
-                    if resp_del.status_code not in (200, 204):
-                        raise Exception(f"Supabase 리액션 삭제 실패 (HTTP {resp_del.status_code}): {resp_del.text}")
-                    existing['count'] = 0
-                    return existing
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp_get = await client.get(url, headers=headers)
+            
+            if resp_get.status_code == 200 and resp_get.json():
+                existing = resp_get.json()[0]
+                if is_canceling:
+                    new_count = int(existing['count']) - 1
+                    if new_count <= 0:
+                        del_url = f"{SUPABASE_URL}/rest/v1/check_reactions?id=eq.{existing['id']}"
+                        resp_del = await client.delete(del_url, headers=headers)
+                        if resp_del.status_code not in (200, 204):
+                            raise Exception(f"Supabase 리액션 삭제 실패 (HTTP {resp_del.status_code}): {resp_del.text}")
+                        existing['count'] = 0
+                        return existing
+                    else:
+                        update_url = f"{SUPABASE_URL}/rest/v1/check_reactions?id=eq.{existing['id']}"
+                        resp_up = await client.patch(update_url, headers=headers, json={"count": new_count})
+                        if resp_up.status_code not in (200, 204):
+                            raise Exception(f"Supabase 리액션 수정 실패 (HTTP {resp_up.status_code}): {resp_up.text}")
+                        existing['count'] = new_count
+                        return existing
                 else:
-                    # Update count
+                    new_count = int(existing['count']) + 1
                     update_url = f"{SUPABASE_URL}/rest/v1/check_reactions?id=eq.{existing['id']}"
-                    resp_up = requests.patch(update_url, headers=headers, json={"count": new_count})
+                    resp_up = await client.patch(update_url, headers=headers, json={"count": new_count})
                     if resp_up.status_code not in (200, 204):
                         raise Exception(f"Supabase 리액션 수정 실패 (HTTP {resp_up.status_code}): {resp_up.text}")
                     existing['count'] = new_count
                     return existing
             else:
-                # Increment count
-                new_count = int(existing['count']) + 1
-                update_url = f"{SUPABASE_URL}/rest/v1/check_reactions?id=eq.{existing['id']}"
-                resp_up = requests.patch(update_url, headers=headers, json={"count": new_count})
-                if resp_up.status_code not in (200, 204):
-                    raise Exception(f"Supabase 리액션 수정 실패 (HTTP {resp_up.status_code}): {resp_up.text}")
-                
-                existing['count'] = new_count
-                return existing
-        else:
-            if is_canceling:
-                return {"check_id": check_id, "emoji": emoji, "count": 0}
-                
-            # Not exist -> insert
-            reaction_data = {
-                "check_id": check_id,
-                "emoji": emoji,
-                "count": 1
-            }
-            resp_in = requests.post(f"{SUPABASE_URL}/rest/v1/check_reactions", headers=headers, json=reaction_data)
-            if resp_in.status_code != 201:
-                raise Exception(f"Supabase 리액션 저장 실패 (HTTP {resp_in.status_code}): {resp_in.text}")
-            return resp_in.json()[0]
+                if is_canceling:
+                    return {"check_id": check_id, "emoji": emoji, "count": 0}
+                    
+                reaction_data = {
+                    "check_id": check_id,
+                    "emoji": emoji,
+                    "count": 1
+                }
+                resp_in = await client.post(f"{SUPABASE_URL}/rest/v1/check_reactions", headers=headers, json=reaction_data)
+                if resp_in.status_code != 201:
+                    raise Exception(f"Supabase 리액션 저장 실패 (HTTP {resp_in.status_code}): {resp_in.text}")
+                return resp_in.json()[0]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"리액션 저장 실패: {str(e)}")
 
 if __name__ == "__main__":
-    # uvicorn은 로컬 개발 서버 실행에만 필요합니다 (서버리스 배포에는 불필요)
     import uvicorn
-    # Prevent print encoding issues
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')

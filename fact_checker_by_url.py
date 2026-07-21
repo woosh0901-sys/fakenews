@@ -46,7 +46,7 @@ def fetch_duckduckgo_search(query, max_results=3):
     ]
     
     try:
-        resp = requests.post(url, headers=headers, data=data, timeout=10)
+        resp = requests.post(url, headers=headers, data=data, timeout=3)
         if resp.status_code == 200:
             soup = BeautifulSoup(resp.text, 'html.parser')
             # DuckDuckGo HTML 검색 결과 파싱
@@ -108,80 +108,24 @@ def fetch_hybrid_news(query, display_count=3):
     네이버 뉴스 검색 API와 DuckDuckGo 실시간 웹 검색 결과를 모두 수집하고 병합하여
     네이버와 구글 검색을 완벽히 모방하는 하이브리드 대조 결과를 만듭니다.
     """
-    from concurrent.futures import ThreadPoolExecutor
+    # 1. 네이버 뉴스 검색 시도
+    naver_sources = fetch_naver_news(NAVER_CLIENT_ID, NAVER_CLIENT_SECRET, query, display_count=display_count)
+    print(f"    - 네이버 뉴스 검색 결과: {len(naver_sources)}개 수집됨.")
     
-    naver_sources = []
-    web_sources = []
-    
-    has_korean = bool(re.search(r'[가-힣]', query))
-    
-    def get_naver():
-        nonlocal naver_sources
-        try:
-            naver_sources = fetch_naver_news(NAVER_CLIENT_ID, NAVER_CLIENT_SECRET, query, display_count=display_count)
-            print(f"    - 네이버 뉴스 검색 결과: {len(naver_sources)}개 수집됨.")
-        except Exception as e:
-            print(f"    [-] 네이버 뉴스 검색 실패: {e}")
-
-    def get_ddg_ko():
-        nonlocal web_sources
-        if has_korean:
-            try:
-                res = fetch_duckduckgo_search(query, max_results=display_count)
-                web_sources.extend(res)
-                print(f"    - DuckDuckGo 한글 검색 결과: {len(res)}개 수집됨.")
-            except Exception as e:
-                print(f"    [-] DuckDuckGo 한글 검색 실패: {e}")
-
-    def get_ddg_en():
-        nonlocal web_sources
-        try:
-            if has_korean:
-                eng_query = translate_ko_to_en(query)
-                if eng_query and eng_query != query:
-                    print(f"    - 해외 기사 교차 대조를 위해 영어 번역 쿼리 실행: '{eng_query}'")
-                    res = fetch_duckduckgo_search(eng_query, max_results=display_count)
-                    web_sources.extend(res)
-                    print(f"    - DuckDuckGo 영문 검색 결과: {len(res)}개 수집됨.")
-            else:
-                res = fetch_duckduckgo_search(query, max_results=display_count)
-                web_sources.extend(res)
-                print(f"    - DuckDuckGo 영문 검색 결과: {len(res)}개 수집됨.")
-        except Exception as e:
-            print(f"    [-] DuckDuckGo 영문 검색 실패: {e}")
-
-    # 병렬로 실행하여 검색 지연 단축
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = [
-            executor.submit(get_naver),
-            executor.submit(get_ddg_ko),
-            executor.submit(get_ddg_en)
-        ]
-        # 모든 스레드가 완료될 때까지 대기
-        for future in futures:
-            future.result()
-            
-    # 3. 중복 제거하며 병합 (네이버 결과 우선순위, 해외 원본 기사 우선순위 부여)
+    # 2. DuckDuckGo 실시간 웹 검색 실행 (1회만 호출하여 속도 최적화)
+    web_sources = fetch_duckduckgo_search(query, max_results=display_count)
+    print(f"    - DuckDuckGo 웹 검색 결과: {len(web_sources)}개 수집됨.")
+        
+    # 3. 중복 제거하며 병합 (네이버 결과 우선순위)
     merged = []
     existing_links = set()
     
-    # (1) 네이버 뉴스 우선 추가
     for s in naver_sources:
         if s['link'] not in existing_links:
             merged.append(s)
             existing_links.add(s['link'])
             
-    # (2) 영어/해외 소스 추가 (제목에 한글이 없는 것을 탐지하여 우선순위 부여)
-    english_sources = [s for s in web_sources if not re.search(r'[가-힣]', s['title'])]
-    korean_web_sources = [s for s in web_sources if re.search(r'[가-힣]', s['title'])]
-    
-    for s in english_sources:
-        if s['link'] not in existing_links:
-            merged.append(s)
-            existing_links.add(s['link'])
-            
-    # (3) 나머지 한국어 웹 소스 추가
-    for s in korean_web_sources:
+    for s in web_sources:
         if s['link'] not in existing_links:
             merged.append(s)
             existing_links.add(s['link'])
@@ -189,7 +133,7 @@ def fetch_hybrid_news(query, display_count=3):
     print(f"    - 하이브리드 검색 병합 완료: 통합 {len(merged)}개 소스 확보.")
     return merged[:display_count]
 
-def scrape_url_content(url, timeout=15):
+def scrape_url_content(url, timeout=5):
     """
     주어진 URL 웹페이지를 크롤링하여 기사 제목과 본문을 추출합니다.
     """
@@ -297,7 +241,7 @@ def scrape_url_content(url, timeout=15):
         ])
         
         found_links = []
-        if is_community or (text and len(text) < 400):
+        if is_community or (text and len(text) < 150):
             news_patterns = [
                 r'news\.naver\.com', r'v\.daum\.net', r'news\.v\.daum\.net',
                 r'chosun\.com', r'donga\.com', r'joongang\.co\.kr', r'hani\.co\.kr',
@@ -327,11 +271,20 @@ def scrape_url_content(url, timeout=15):
         if found_links:
             print(f"    [+] 본문 내 뉴스 원본 링크 감지: {found_links}")
             crawled_contents = []
-            for link in found_links[:3]:  # 최대 3개 크롤링
-                if link != url:  # 무한 루프 방지
-                    print(f"    - 원본 뉴스 링크 추가 크롤링 진행: {link}")
-                    original_article = scrape_url_content(link)
-                    if original_article and original_article['content']:
+            links_to_crawl = [link for link in found_links[:3] if link != url]
+            if links_to_crawl:
+                from concurrent.futures import ThreadPoolExecutor
+                def crawl_link(l):
+                    try:
+                        return scrape_url_content(l, timeout=3)
+                    except Exception:
+                        return None
+                
+                with ThreadPoolExecutor(max_workers=3) as executor:
+                    crawled_results = list(executor.map(crawl_link, links_to_crawl))
+                
+                for original_article in crawled_results:
+                    if original_article and original_article.get('content'):
                         crawled_contents.append(f"[연동 뉴스 원본: {original_article['title']}]\n{original_article['content']}")
             
             if crawled_contents:
@@ -369,7 +322,7 @@ def scrape_instagram_post(url):
         "User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"
     }
     try:
-        resp = requests.get(canonical_url, headers=headers, timeout=15)
+        resp = requests.get(canonical_url, headers=headers, timeout=5)
         if resp.status_code != 200:
             print(f"[-] 인스타그램 게시물 접근 실패 (HTTP {resp.status_code}): {canonical_url}")
             return None
@@ -475,7 +428,7 @@ def scrape_twitter_post(url):
         resp = requests.get(
             "https://publish.twitter.com/oembed",
             params={"url": canonical_url, "omit_script": "true", "lang": "ko"},
-            timeout=15
+            timeout=5
         )
         if resp.status_code != 200:
             print(f"[-] 트위터 oEmbed 조회 실패 (HTTP {resp.status_code}). 삭제되었거나 비공개 계정의 게시물일 수 있습니다.")
@@ -513,7 +466,12 @@ def strip_josa(word):
     """
     한글 단어 뒤에 붙는 대표적인 조사들을 지워 명사 원형만 남깁니다.
     """
-    protected_words = {"국가", "회의", "결과", "효과", "통과", "온도", "태도", "속도", "지도", "제도", "도로", "서로", "나이", "아이", "오이", "차이", "주의", "정의", "합의", "평화", "대화", "변화", "문화", "영화", "전화"}
+    # 한글 명사 원형 보호를 위한 예외 명사 사전 대폭 강화
+    protected_words = {
+        "국가", "회의", "결과", "효과", "통과", "온도", "태도", "속도", "지도", "제도", "도로", "서로", "나이", "아이", "오이", "차이", 
+        "주의", "정의", "합의", "평화", "대화", "변화", "문화", "영화", "전화", "의사", "교사", "판사", "검사", "조사", "수사", "인사",
+        "감사", "역사", "회사", "행사", "공사", "기사", "식사", "상사", "고사", "대사", "천사", "박사", "석사", "학사", "유사", "묘사"
+    }
     if word in protected_words:
         return word
     josa_suffixes = ["에서", "한테", "부터", "까지", "으로", "처럼", "하고", "이며", "은", "는", "이", "가", "을", "를", "의", "에", "와", "과", "도", "만", "랑", "며", "로"]
@@ -531,11 +489,14 @@ def extract_keywords_fast(title):
     cleaned = re.sub(r'[^가-힣a-zA-Z0-9\s]', ' ', title)
     words = cleaned.split()
     
-    # 팩트체크 검색어로서 유용하지 않은 일반 서술어/조사류/시간단어/의미없는 1글자 단어 필터링
+    # 팩트체크 검색어로서 유용하지 않은 일반 서술어/조사류/시간단어/의미없는 1글자 단어 필터링 사전 대폭 확장
     stopwords = [
         "오늘", "내일", "어제", "올해", "내년", "최근", "하루", "이틀", "이번", "주말", "평일", "휴일", "명절", 
         "기자", "뉴스", "보도", "착수", "개발", "기술", "경찰", "정부", "공고", "지원", "선정", "했다", "한다", "밝혔다", "적발", "검거", "조사",
-        "및", "등", "더", "또", "속", "과", "와", "한", "그", "저", "요", "네", "아", "오", "제", "매", "수", "것", "등등"
+        "및", "등", "더", "또", "속", "과", "와", "한", "그", "저", "요", "네", "아", "오", "제", "매", "수", "것", "등등",
+        "진짜", "가짜", "충격", "결국", "의혹", "논란", "사실", "해명", "공개", "주장", "전면", "부인", "반박", "발표", "확인", "의문", "루머",
+        "네티즌", "네티즌들", "커뮤니티", "누리꾼", "누리꾼들", "SNS", "인스타그램", "트위터", "유튜브", "영상", "사진", "포착", "근황", "공식",
+        "입장", "발언", "논란이", "논란은", "의혹이", "의혹은", "충격적인", "발칵", "뒤집힌", "난리", "난리난"
     ]
     
     filtered = []
@@ -546,8 +507,16 @@ def extract_keywords_fast(title):
             if len(cleaned_word) >= 1 and cleaned_word not in stopwords:
                 filtered.append(cleaned_word)
             
+    # 중복 제거 및 순서 보존
+    seen = set()
+    unique_filtered = []
+    for w in filtered:
+        if w not in seen:
+            seen.add(w)
+            unique_filtered.append(w)
+            
     # 핵심 명사 최대 10개 선택 (이벤트 핵심 액션 단어 유실 방지)
-    return filtered[:10]
+    return unique_filtered[:10]
 
 def call_gemini_api(prompt, response_mime_type=None, temperature=None, max_output_tokens=None):
     """
@@ -562,7 +531,7 @@ def call_gemini_api(prompt, response_mime_type=None, temperature=None, max_outpu
         return None
     
     # 사용할 모델 목록 (우선순위 순서)
-    models = ["gemini-2.5-flash", "gemini-2.0-flash-lite"]
+    models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"]
     
     # 서버리스 환경에서는 타임아웃을 짧게 설정하여 Vercel 60초 제한에 대비
     request_timeout = 20 if IS_SERVERLESS else 25
@@ -615,7 +584,11 @@ def call_gemini_api(prompt, response_mime_type=None, temperature=None, max_outpu
                     sleep_time = (backoff_factor ** attempt) * 2
                     print(f"[-] Gemini API Rate Limit (429) 감지. {sleep_time:.1f}초 후 재시도합니다...")
                     time.sleep(sleep_time)
-                elif resp.status_code in [500, 503, 504]:
+                elif resp.status_code == 503:
+                    # 503 = 모델 과부하 → 같은 모델 재시도해봐야 의미 없으므로 즉시 다음 폴백 모델로
+                    print(f"[-] Gemini API 모델 과부하 (503: UNAVAILABLE). 즉시 다음 폴백 모델로 전환합니다...")
+                    break
+                elif resp.status_code in [500, 504]:
                     sleep_time = (backoff_factor ** attempt) * 1.5
                     print(f"[-] Gemini API 서버 오류 ({resp.status_code}). {sleep_time:.1f}초 후 재시도합니다...")
                     time.sleep(sleep_time)
@@ -651,8 +624,8 @@ def fact_check_article_with_sources(target_title, target_content, sources, conte
     def crawl_source(index, link):
         try:
             print(f"      - [참고 자료 {index+1}] 본문 크롤링 진행: {link}")
-            # 참고 자료 크롤링의 경우 타임아웃을 5초로 타이트하게 잡아 지연을 최소화합니다.
-            ref_art = scrape_url_content(link, timeout=5)
+            # 참고 자료 크롤링의 경우 타임아웃을 타이트하게 잡아 지연을 최소화합니다.
+            ref_art = scrape_url_content(link, timeout=3.5 if IS_SERVERLESS else 5.0)
             if ref_art and ref_art['content']:
                 return ref_art['content'][:1200]
         except Exception as e:
@@ -1013,7 +986,7 @@ def check_url_validity(url, nll_model=None, nll_threshold=5.6):
     
     print("\n[3] 실시간 포털 및 웹 검색 교차 검증 정보 수집 중...")
     # 실시간 처리 속도를 올리기 위해 기사 수를 3개로 제한 (네이버 뉴스 + DuckDuckGo 하이브리드)
-    sources = fetch_hybrid_news(search_query, display_count=5)
+    sources = fetch_hybrid_news(search_query, display_count=3)
     print(f"    - 수집된 신뢰 기사 개수: {len(sources)}개")
     for i, s in enumerate(sources):
         print(f"      ({i+1}) {s['title']} | {s['pubDate']}")
