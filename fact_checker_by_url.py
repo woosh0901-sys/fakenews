@@ -191,7 +191,19 @@ def scrape_url_content(url):
             if not title_el:
                 title_el = soup.find('h1') or soup.find('title')
             title = title_el.get_text().strip() if title_el else "No Title"
-            
+
+        # 1-5. 출처(Source) 추출 — 분석 로딩 화면의 "○○ 기사를 분석중이에요" 표기에 사용
+        source = ""
+        og_site = soup.find('meta', property='og:site_name')
+        if og_site and og_site.get('content'):
+            source = og_site['content'].strip()
+        if not source:
+            try:
+                import urllib.parse as _urlparse
+                source = (_urlparse.urlparse(url).hostname or "").replace("www.", "")
+            except Exception:
+                source = ""
+
         # 2. 본문(Content) 추출
         # 불필요한 태그 제거 (스크립트, 스타일, 네비게이션, 푸터 등)
         for element in soup(["script", "style", "nav", "footer", "header", "aside", "noscript", "iframe"]):
@@ -258,7 +270,8 @@ def scrape_url_content(url):
         return {
             'url': url,
             'title': title,
-            'content': text
+            'content': text,
+            'source': source
         }
     except Exception as e:
         print(f"[-] 웹 크롤링 중 에러 발생: {e}")

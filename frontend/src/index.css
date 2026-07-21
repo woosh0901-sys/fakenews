@@ -172,10 +172,48 @@ body {
   will-change: transform, opacity;
 }
 
+/* 분석 로딩 — 원형 인디케이터 회전 */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.spin {
+  animation: spin 900ms linear infinite;
+}
+
+/* 분석 로딩 — 기사 본문이 천천히 위로 흘러 '스캔되는' 느낌.
+   transform만 사용해 컴포지터에서 처리(§프레임 스무스니스) */
+@keyframes article-scan {
+  from { transform: translateY(0); }
+  to   { transform: translateY(-50%); }
+}
+.article-scan {
+  animation: article-scan 38s linear infinite;
+  will-change: transform;
+}
+
+/* 아래로 갈수록 사라지는 마스크 (Figma landing_loading) */
+.article-fade {
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 30%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 30%, transparent 100%);
+}
+
+/* 화면 전환 — 단순한 페이드 + 살짝 떠오르기 */
+@keyframes view-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.view-in {
+  animation: view-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 /* 접근성: 모션 최소화 설정 시 이동(vestibular) 없이 크로스페이드로 대체 */
 @media (prefers-reduced-motion: reduce) {
   .float-in { animation: fade-in 0.4s ease both; }
   .ticker-in { animation: fade-in 0.4s ease; }
+  .view-in { animation: fade-in 0.3s ease both; }
+  /* 큰 면적이 계속 움직이는 스캔 효과는 정지 (스피너는 상태 표시라 유지하되 느리게) */
+  .article-scan { animation: none; }
+  .spin { animation: spin 1.8s linear infinite; }
 }
 
 /* Custom scrollbars for details panel and layout */

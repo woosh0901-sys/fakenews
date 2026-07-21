@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Shield, TrendingUp, Moon, Sun, ArrowRight } from "lucide-react";
+import { Shield, TrendingUp, Moon, Sun, ArrowRight, Loader2, CheckCircle } from "lucide-react";
 
 // 행별 페이드 감쇠 (피그마 디자인의 스택 페이드 재현)
 const ROW_OPACITY = [1, 0.72, 0.55, 0.4, 0.28];
@@ -22,10 +22,26 @@ const VERDICT_BADGE = {
 };
 const verdictBadge = (verdict) => VERDICT_BADGE[verdict] || VERDICT_BADGE.SUSPICIOUS;
 
-export default function Landing({ darkMode, setDarkMode, history, loading, onSubmit, onOpenDashboard }) {
+export default function Landing({
+  darkMode, setDarkMode, history, loading, onSubmit, onOpenDashboard,
+  analyzing = false, analysisDone = false, preview = null,
+}) {
   const [url, setUrl] = useState("");
   const [offset, setOffset] = useState(0);
   const [paused, setPaused] = useState(false);
+
+  // 분석 로딩 화면에 흘려보낼 기사 본문 문단
+  const paragraphs = useMemo(() => {
+    const raw = (preview?.content || "").trim();
+    if (!raw) return [];
+    const byLine = raw.split(/\n+/).map((s) => s.trim()).filter((s) => s.length > 10);
+    if (byLine.length > 1) return byLine.slice(0, 24);
+    // 한 덩어리로 온 경우 문장 두 개씩 묶어 문단화
+    const sentences = raw.split(/(?<=[.!?。])\s+/).map((s) => s.trim()).filter(Boolean);
+    const out = [];
+    for (let i = 0; i < sentences.length; i += 2) out.push(sentences.slice(i, i + 2).join(" "));
+    return out.slice(0, 24);
+  }, [preview]);
 
   // URL별 검증 횟수 상위 5건 (동률이면 최신순)
   const topArticles = useMemo(() => {
@@ -153,7 +169,53 @@ export default function Landing({ darkMode, setDarkMode, history, loading, onSub
           </button>
         </form>
 
-        {/* 실시간 가장 많이 검증된 기사 (Top 5) 티커 */}
+        {/* 분석 중: 상태줄 + 기사 본문 스캔 (Figma landing_loading) */}
+        {analyzing ? (
+          <section className="float-in mt-8 w-full max-w-2xl" style={{ animationDelay: "60ms" }}>
+            <p className="flex items-center justify-center gap-2 text-base md:text-lg font-bold text-neutral-900 dark:text-neutral-100 text-center">
+              {analysisDone ? (
+                <>
+                  <CheckCircle size={20} className="text-secondary-600 dark:text-secondary-400 shrink-0" />
+                  분석이 완료되었어요
+                </>
+              ) : (
+                <>
+                  <span>
+                    {preview?.source ? `${preview.source} 기사를 분석중이에요` : "기사를 분석중이에요"}
+                  </span>
+                  <Loader2 size={20} className="spin text-brand-500 dark:text-brand-300 shrink-0" />
+                </>
+              )}
+            </p>
+
+            {/* 기사 본문 — 천천히 위로 흐르며 아래로 갈수록 사라짐 */}
+            <div className="mt-5 h-[300px] overflow-hidden article-fade" aria-hidden="true">
+              {paragraphs.length === 0 ? (
+                <div className="space-y-3 animate-pulse">
+                  {[88, 76, 92, 68, 84].map((w, i) => (
+                    <div
+                      key={i}
+                      className="h-3 rounded bg-neutral-200 dark:bg-neutral-800 mx-auto"
+                      style={{ width: `${w}%` }}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="article-scan space-y-3.5">
+                  {[...paragraphs, ...paragraphs].map((p, i) => (
+                    <p
+                      key={i}
+                      className="text-xs leading-relaxed text-neutral-500 dark:text-neutral-400 text-center px-4"
+                    >
+                      {p}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        ) : (
+        /* 실시간 가장 많이 검증된 기사 (Top 5) 티커 */
         <section
           className="float-in mt-8 w-full max-w-xl"
           style={{ animationDelay: "300ms" }}
@@ -218,6 +280,7 @@ export default function Landing({ darkMode, setDarkMode, history, loading, onSub
             )}
           </div>
         </section>
+        )}
       </main>
     </div>
   );
