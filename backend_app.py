@@ -127,33 +127,36 @@ async def check_url(payload: CheckRequest):
                     cache_data = cache_resp.json()
                     if cache_data and len(cache_data) > 0:
                         cache_item = cache_data[0]
-                        print(f"[★] 동일 URL에 대한 최근 24시간 내 캐시된 검사 결과가 있어 DB에서 즉시 반환합니다: {url}")
-                        
-                        # Reference format normalization
-                        raw_sources = cache_item.get("sources") or []
-                        formatted_sources = []
-                        for s in raw_sources:
-                            formatted_sources.append({
-                                "title": s.get("title"),
-                                "link": s.get("link"),
-                                "description": s.get("description"),
-                                "pubDate": s.get("pub_date")
-                            })
+                        if cache_item.get("verdict") == "REAL":
+                            print(f"[★] 동일 URL에 대한 최근 24시간 내 '진실(REAL)' 캐시된 검사 결과가 있어 DB에서 즉시 반환합니다: {url}")
                             
-                        result = {
-                            "id": cache_item.get("id"),
-                            "verdict": cache_item.get("verdict"),
-                            "contradiction_score": cache_item.get("contradiction_score"),
-                            "nll_loss": cache_item.get("nll_loss"),
-                            "reason": cache_item.get("reason"),
-                            "stage": cache_item.get("stage"),
-                            "target_title": cache_item.get("title"),
-                            "target_url": cache_item.get("url"),
-                            "claims_breakdown": cache_item.get("claims_breakdown") or [],
-                            "sources": formatted_sources,
-                            "cached": True
-                        }
-                        return result
+                            # Reference format normalization
+                            raw_sources = cache_item.get("sources") or []
+                            formatted_sources = []
+                            for s in raw_sources:
+                                formatted_sources.append({
+                                    "title": s.get("title"),
+                                    "link": s.get("link"),
+                                    "description": s.get("description"),
+                                    "pubDate": s.get("pub_date")
+                                })
+                                
+                            result = {
+                                "id": cache_item.get("id"),
+                                "verdict": cache_item.get("verdict"),
+                                "contradiction_score": cache_item.get("contradiction_score"),
+                                "nll_loss": cache_item.get("nll_loss"),
+                                "reason": cache_item.get("reason"),
+                                "stage": cache_item.get("stage"),
+                                "target_title": cache_item.get("title"),
+                                "target_url": cache_item.get("url"),
+                                "claims_breakdown": cache_item.get("claims_breakdown") or [],
+                                "sources": formatted_sources,
+                                "cached": True
+                            }
+                            return result
+                        else:
+                            print(f"[*] 캐시된 기록이 있으나 판정이 {cache_item.get('verdict')}이므로 실시간 재검증을 진행합니다: {url}")
         except Exception as cache_err:
             print(f"[-] 캐시 조회 실패 (정상 팩트체크 파이프라인으로 진행): {cache_err}")
             
