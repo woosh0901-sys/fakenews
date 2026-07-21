@@ -22,6 +22,10 @@ IS_SERVERLESS = bool(os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNC
 # Real credentials (loaded automatically from naver_news_api.py if set, or defined here)
 from naver_news_api import NAVER_CLIENT_ID, NAVER_CLIENT_SECRET, GEMINI_API_KEY
 
+class GeminiRateLimitError(Exception):
+    """Gemini API 429 Too Many Requests 예외"""
+    pass
+
 def fetch_duckduckgo_search(query, max_results=3):
     """
     네이버 뉴스 검색 API에 걸리지 않는 IT/글로벌/구글 뉴스 기사를 커버하기 위해
@@ -581,9 +585,8 @@ def call_gemini_api(prompt, response_mime_type=None, temperature=None, max_outpu
                     print(f"    응답: {resp.text[:300]}")
                     return None
                 elif resp.status_code == 429:
-                    sleep_time = (backoff_factor ** attempt) * 2
-                    print(f"[-] Gemini API Rate Limit (429) 감지. {sleep_time:.1f}초 후 재시도합니다...")
-                    time.sleep(sleep_time)
+                    print("[-] Gemini API Rate Limit (429) 감지. 호출 한도를 초과하여 즉시 중단합니다.")
+                    raise GeminiRateLimitError("Gemini API 호출 제한(429 Too Many Requests)이 초과되었습니다.")
                 elif resp.status_code == 503:
                     # 503 = 모델 과부하 → 같은 모델 재시도해봐야 의미 없으므로 즉시 다음 폴백 모델로
                     print(f"[-] Gemini API 모델 과부하 (503: UNAVAILABLE). 즉시 다음 폴백 모델로 전환합니다...")
@@ -708,6 +711,8 @@ def fact_check_article_with_sources(target_title, target_content, sources, conte
                         if "claims_breakdown" not in res:
                             res["claims_breakdown"] = []
                         gemini_result = res
+        except GeminiRateLimitError:
+            raise
         except Exception as e:
             print(f"[-] Gemini API 분석 중 예외 발생: {e}")
             
@@ -899,6 +904,8 @@ def generate_search_query_via_llm(title, content):
             # Clean output from punctuation/markdown
             output = re.sub(r'[^가-힣a-zA-Z0-9\s]', '', output)
             return " ".join(output.split())
+    except GeminiRateLimitError:
+        raise
     except Exception as e:
         print(f"[-] LLM 검색어 생성 실패: {e}")
     return None
@@ -908,101 +915,116 @@ def check_url_validity(url, nll_model=None, nll_threshold=5.6):
     주어진 URL을 크롤링하여 팩트 체크를 전체 수행하는 핵심 파이프라인 함수
     1단계 NLL 통계 필터가 동작한 뒤, 의심 기사만 2단계 RAG-LLM 분석을 수행합니다.
     """
-    print(f"\n[1] 입력받은 URL 크롤링 중...")
-    print(f"    Target: {url}")
-    # SNS 게시물(인스타그램/트위터)은 전용 스크레이퍼 사용
-    sns_label = None
-    if is_instagram_url(url):
-        sns_label = "인스타그램 게시물"
-        article = scrape_instagram_post(url)
-    elif is_twitter_url(url):
-        sns_label = "X(트위터) 게시물"
-        article = scrape_twitter_post(url)
-    else:
-        article = scrape_url_content(url)
-
-    if not article or not article['content']:
-        print("[-] 본문 텍스트를 추출할 수 없거나 웹페이지 접근에 실패했습니다.")
-        return None
-
-    print(f"    - 기사 제목: {article['title']}")
-    print(f"    - 본문 길이: {len(article['content'])} 자 추출 완료.")
-
-    # === 1단계: NLL 통계 필터 검사 ===
-    # SNS 본문은 뉴스 문체 코퍼스로 학습된 NLL 필터에 부적합하므로 건너뛰고 바로 2단계 검증
-    nll_loss = None
-    if sns_label:
-        print("\n[1-5] SNS 게시물은 1단계 NLL 필터를 건너뛰고 2단계 정밀 팩트체크로 바로 진행합니다.")
-    elif nll_model:
-        print("\n[1-5] 1단계 NLL 통계 필터 분석 중...")
-        tokens = custom_tokenize(article['title'] + " " + article['content'])
-        nll_loss, _ = nll_model.calculate_sentence_loss(tokens)
-        print(f"    - 계산된 NLL Loss: {nll_loss:.4f} (임계값: {nll_threshold:.4f})")
-        
-        if nll_loss < nll_threshold:
-            print("    [★] NLL 점수가 임계값 미만입니다. 자연스러운 문장 구조를 가진 진짜 뉴스로 판단되어 패스합니다.")
-            return {
-                "verdict": "REAL",
-                "reason": f"1단계 NLL 통계 필터 검사 결과, 기사 문맥 전이 확률 손실(NLL Loss: {nll_loss:.4f})이 정상 범위(임계값: {nll_threshold:.4f}) 이내입니다. 조작되었거나 왜곡된 가짜 뉴스일 가능성이 낮아 통과되었습니다.",
-                "contradiction_score": 0.0,
-                "target_title": article['title'],
-                "target_url": url,
-                "nll_loss": round(nll_loss, 4),
-                "stage": 1,
-                "sources": [],
-                "claims_breakdown": []
-            }
+    try:
+        print(f"\n[1] 입력받은 URL 크롤링 중...")
+        print(f"    Target: {url}")
+        # SNS 게시물(인스타그램/트위터)은 전용 스크레이퍼 사용
+        sns_label = None
+        if is_instagram_url(url):
+            sns_label = "인스타그램 게시물"
+            article = scrape_instagram_post(url)
+        elif is_twitter_url(url):
+            sns_label = "X(트위터) 게시물"
+            article = scrape_twitter_post(url)
         else:
-            print("    [!] NLL 점수가 임계값을 초과했습니다. 기사의 문맥 연결이 부자연스러워 2단계 정밀 팩트체크로 이관합니다.")
+            article = scrape_url_content(url)
+
+        if not article or not article['content']:
+            print("[-] 본문 텍스트를 추출할 수 없거나 웹페이지 접근에 실패했습니다.")
+            return None
+
+        print(f"    - 기사 제목: {article['title']}")
+        print(f"    - 본문 길이: {len(article['content'])} 자 추출 완료.")
+
+        # === 1단계: NLL 통계 필터 검사 ===
+        # SNS 본문은 뉴스 문체 코퍼스로 학습된 NLL 필터에 부적합하므로 건너뛰고 바로 2단계 검증
+        nll_loss = None
+        if sns_label:
+            print("\n[1-5] SNS 게시물은 1단계 NLL 필터를 건너뛰고 2단계 정밀 팩트체크로 바로 진행합니다.")
+        elif nll_model:
+            print("\n[1-5] 1단계 NLL 통계 필터 분석 중...")
+            tokens = custom_tokenize(article['title'] + " " + article['content'])
+            nll_loss, _ = nll_model.calculate_sentence_loss(tokens)
+            print(f"    - 계산된 NLL Loss: {nll_loss:.4f} (임계값: {nll_threshold:.4f})")
             
-    else:
-        print("\n[-] NLL 모델이 로드되지 않아 1단계를 건너뛰고 2단계로 바로 진행합니다.")
-        
-    # === 2단계: RAG-LLM 팩트체크 ===
-    print("\n[2] 로컬 텍스트 분석 기반 핵심 검색 키워드 추출 중...")
-    # SNS는 '[플랫폼] 유저명:' 접두어를 제외한 본문에서 키워드 추출
-    search_base = article.get('search_text') or article['title']
-    
-    # SNS 또는 커뮤니티의 경우 비정형 데이터이므로 LLM 기반 검색 쿼리 생성을 먼저 시도합니다.
-    search_query = None
-    is_sns_or_community = bool(sns_label) or any(dom in url for dom in [
-        "dcinside.com", "fmkorea.com", "ruliweb.com", "clien.net", "ppomppu.co.kr", 
-        "instiz.net", "inven.co.kr", "todayhumor.co.kr", "mlbpark.donga.com", 
-        "slrclub.com", "pann.nate.com", "bobaedream.co.kr", "theqoo.net", "instiz"
-    ])
-    
-    if is_sns_or_community:
-        print("    - SNS/커뮤니티 출처 탐지: 더 정밀한 검색을 위해 LLM 기반 검색 쿼리 생성을 시도합니다.")
-        search_query = generate_search_query_via_llm(article['title'], article['content'])
-        
-    if not search_query:
-        keywords = extract_keywords_fast(search_base)
-        if not keywords:
-            search_query = search_base[:15]
+            if nll_loss < nll_threshold:
+                print("    [★] NLL 점수가 임계값 미만입니다. 자연스러운 문장 구조를 가진 진짜 뉴스로 판단되어 패스합니다.")
+                return {
+                    "verdict": "REAL",
+                    "reason": f"1단계 NLL 통계 필터 검사 결과, 기사 문맥 전이 확률 손실(NLL Loss: {nll_loss:.4f})이 정상 범위(임계값: {nll_threshold:.4f}) 이내입니다. 조작되었거나 왜곡된 가짜 뉴스일 가능성이 낮아 통과되었습니다.",
+                    "contradiction_score": 0.0,
+                    "target_title": article['title'],
+                    "target_url": url,
+                    "nll_loss": round(nll_loss, 4),
+                    "stage": 1,
+                    "sources": [],
+                    "claims_breakdown": []
+                }
+            else:
+                print("    [!] NLL 점수가 임계값을 초과했습니다. 기사의 문맥 연결이 부자연스러워 2단계 정밀 팩트체크로 이관합니다.")
+                
         else:
-            search_query = " ".join(keywords)
+            print("\n[-] NLL 모델이 로드되지 않아 1단계를 건너뛰고 2단계로 바로 진행합니다.")
             
-    print(f"    - 추출된 검색어: '{search_query}'")
-    
-    print("\n[3] 실시간 포털 및 웹 검색 교차 검증 정보 수집 중...")
-    # 실시간 처리 속도를 올리기 위해 기사 수를 3개로 제한 (네이버 뉴스 + DuckDuckGo 하이브리드)
-    sources = fetch_hybrid_news(search_query, display_count=3)
-    print(f"    - 수집된 신뢰 기사 개수: {len(sources)}개")
-    for i, s in enumerate(sources):
-        print(f"      ({i+1}) {s['title']} | {s['pubDate']}")
+        # === 2단계: RAG-LLM 팩트체크 ===
+        print("\n[2] 로컬 텍스트 분석 기반 핵심 검색 키워드 추출 중...")
+        # SNS는 '[플랫폼] 유저명:' 접두어를 제외한 본문에서 키워드 추출
+        search_base = article.get('search_text') or article['title']
         
-    print("\n[4] RAG-LLM 기반 상호 팩트체크 대조 분석 중...")
-    content_label = sns_label or "기사"
-    result = fact_check_article_with_sources(article['title'], article['content'], sources, content_label=content_label)
-    
-    # 입력 정보 병합
-    result['target_title'] = article['title']
-    result['target_url'] = url
-    result['nll_loss'] = round(nll_loss, 4) if nll_loss else None
-    result['stage'] = 2
-    result['sources'] = sources
-    
-    return result
+        # SNS 또는 커뮤니티의 경우 비정형 데이터이므로 LLM 기반 검색 쿼리 생성을 먼저 시도합니다.
+        search_query = None
+        is_sns_or_community = bool(sns_label) or any(dom in url for dom in [
+            "dcinside.com", "fmkorea.com", "ruliweb.com", "clien.net", "ppomppu.co.kr", 
+            "instiz.net", "inven.co.kr", "todayhumor.co.kr", "mlbpark.donga.com", 
+            "slrclub.com", "pann.nate.com", "bobaedream.co.kr", "theqoo.net", "instiz"
+        ])
+        
+        if is_sns_or_community:
+            print("    - SNS/커뮤니티 출처 탐지: 더 정밀한 검색을 위해 LLM 기반 검색 쿼리 생성을 시도합니다.")
+            search_query = generate_search_query_via_llm(article['title'], article['content'])
+            
+        if not search_query:
+            keywords = extract_keywords_fast(search_base)
+            if not keywords:
+                search_query = search_base[:15]
+            else:
+                search_query = " ".join(keywords)
+                
+        print(f"    - 추출된 검색어: '{search_query}'")
+        
+        print("\n[3] 실시간 포털 및 웹 검색 교차 검증 정보 수집 중...")
+        # 실시간 처리 속도를 올리기 위해 기사 수를 3개로 제한 (네이버 뉴스 + DuckDuckGo 하이브리드)
+        sources = fetch_hybrid_news(search_query, display_count=3)
+        print(f"    - 수집된 신뢰 기사 개수: {len(sources)}개")
+        for i, s in enumerate(sources):
+            print(f"      ({i+1}) {s['title']} | {s['pubDate']}")
+            
+        print("\n[4] RAG-LLM 기반 상호 팩트체크 대조 분석 중...")
+        content_label = sns_label or "기사"
+        result = fact_check_article_with_sources(article['title'], article['content'], sources, content_label=content_label)
+        
+        # 입력 정보 병합
+        result['target_title'] = article['title']
+        result['target_url'] = url
+        result['nll_loss'] = round(nll_loss, 4) if nll_loss else None
+        result['stage'] = 2
+        result['sources'] = sources
+        
+        return result
+    except GeminiRateLimitError as re:
+        print(f"[-] Gemini API Rate Limit 감지되어 판정을 일시 유보합니다: {re}")
+        # fallback으로 안전한 SUSPICIOUS 결과를 제공하여 전체 시스템이 뻗지 않도록 예방
+        return {
+            "verdict": "SUSPICIOUS",
+            "reason": "Gemini API의 분당 호출량 한도(429 Too Many Requests)를 초과하여 최종 판정을 유보합니다. 무료 API 키를 이용 중인 경우 일시적으로 발생할 수 있으니, 1분 후 다시 시도해 주세요.",
+            "contradiction_score": 0.5,
+            "target_title": article['title'] if 'article' in locals() and article else "추출된 기사/게시글",
+            "target_url": url,
+            "nll_loss": round(nll_loss, 4) if 'nll_loss' in locals() and nll_loss else None,
+            "stage": 2,
+            "sources": [],
+            "claims_breakdown": []
+        }
 
 if __name__ == "__main__":
     # Prevent console encoding issues

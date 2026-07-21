@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 # Import our NLL RAG pipeline and credentials
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from fact_checker_by_url import check_url_validity
+from fact_checker_by_url import check_url_validity, GeminiRateLimitError
 from naver_news_api import SUPABASE_URL, SUPABASE_KEY
 
 # Clean SUPABASE_URL to make sure it doesn't end with /rest/v1 or /rest/v1/ (prevent path doubling)
@@ -392,6 +392,8 @@ async def query_check(check_id: int, payload: QueryRequest):
                     answer = output
                 else:
                     answer = "Gemini API 호출에 실패했습니다. 잠시 후 다시 시도해 주세요."
+            except GeminiRateLimitError:
+                answer = "Gemini API의 일시적 호출량 제한(429 Too Many Requests)을 초과했습니다. 무료 API의 경우 1분당 질문 횟수가 제한될 수 있으니, 약 1분 후 다시 시도해 주세요."
             except Exception as e:
                 answer = f"Gemini API 호출 중 오류가 발생했습니다: {str(e)}"
         else:
@@ -450,6 +452,8 @@ async def chat_general(payload: QueryRequest):
                     answer = output
                 else:
                     answer = "Gemini API 호출에 실패했습니다. 잠시 후 다시 시도해 주세요."
+            except GeminiRateLimitError:
+                answer = "Gemini API의 일시적 호출량 제한(429 Too Many Requests)을 초과했습니다. 무료 API의 경우 1분당 질문 횟수가 제한될 수 있으니, 약 1분 후 다시 시도해 주세요."
             except Exception as e:
                 answer = f"Gemini API 호출 중 오류가 발생했습니다: {str(e)}"
         else:
