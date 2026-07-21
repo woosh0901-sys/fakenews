@@ -552,15 +552,21 @@ def extract_keywords_fast(title):
 def call_gemini_api(prompt, response_mime_type=None, temperature=None, max_output_tokens=None):
     """
     Gemini API를 호출하는 공통 함수.
-    gemini-2.0-flash를 우선 시도하고 실패하면 gemini-1.5-flash로 폴백하며,
-    최대 3회 재시도(지수 백오프 적용)를 지원하여 일시적 서버 오류나 할당량 초과에 대응합니다.
+    gemini-2.5-flash를 우선 시도하고 실패하면 gemini-2.0-flash-lite로 폴백하며,
+    최대 2회 재시도(지수 백오프 적용)를 지원하여 일시적 서버 오류나 할당량 초과에 대응합니다.
+    인증 오류(401/403)는 즉시 중단하여 불필요한 API 호출을 방지합니다.
     """
     import time
     if not GEMINI_API_KEY or GEMINI_API_KEY.strip() == "" or GEMINI_API_KEY.strip() == "YOUR_GEMINI_API_KEY":
+        print("[-] GEMINI_API_KEY가 설정되지 않았거나 기본값입니다.")
         return None
     
     # 사용할 모델 목록 (우선순위 순서)
     models = ["gemini-2.5-flash", "gemini-2.0-flash-lite"]
+    
+    # 서버리스 환경에서는 타임아웃을 짧게 설정하여 Vercel 60초 제한에 대비
+    request_timeout = 20 if IS_SERVERLESS else 25
+    max_retries = 2  # 과도한 재시도 방지: 모델당 최대 2회
     
     for model in models:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY.strip()}"
@@ -586,20 +592,25 @@ def call_gemini_api(prompt, response_mime_type=None, temperature=None, max_outpu
         if generation_config:
             payload["generationConfig"] = generation_config
             
-        max_retries = 3
         backoff_factor = 1.5
         
         for attempt in range(max_retries):
             try:
                 print(f"[★] Gemini API 호출 시도 ({model}, 시도 {attempt + 1}/{max_retries})...")
-                resp = requests.post(url, headers=headers, json=payload, timeout=25)
+                resp = requests.post(url, headers=headers, json=payload, timeout=request_timeout)
                 if resp.status_code == 200:
                     data = resp.json()
                     try:
                         return data["candidates"][0]["content"]["parts"][0]["text"].strip()
                     except (KeyError, IndexError) as pe:
                         print(f"[-] Gemini 응답 데이터 구조 오류: {pe}")
+                        print(f"    응답 내용: {json.dumps(data, ensure_ascii=False)[:500]}")
                         break
+                elif resp.status_code in [401, 403]:
+                    # 인증 오류는 재시도해도 소용 없음 → 모든 모델에 대해 즉시 중단
+                    print(f"[-] Gemini API 인증 실패 (HTTP {resp.status_code}): API 키가 유효하지 않거나 권한이 없습니다.")
+                    print(f"    응답: {resp.text[:300]}")
+                    return None
                 elif resp.status_code == 429:
                     sleep_time = (backoff_factor ** attempt) * 2
                     print(f"[-] Gemini API Rate Limit (429) 감지. {sleep_time:.1f}초 후 재시도합니다...")
@@ -609,13 +620,17 @@ def call_gemini_api(prompt, response_mime_type=None, temperature=None, max_outpu
                     print(f"[-] Gemini API 서버 오류 ({resp.status_code}). {sleep_time:.1f}초 후 재시도합니다...")
                     time.sleep(sleep_time)
                 else:
-                    print(f"[-] Gemini API 호출 에러 (HTTP {resp.status_code}): {resp.text}")
+                    print(f"[-] Gemini API 호출 에러 (HTTP {resp.status_code}): {resp.text[:300]}")
                     break
+            except requests.exceptions.Timeout:
+                print(f"[-] Gemini API 타임아웃 ({request_timeout}초 초과). 다음 모델로 전환합니다...")
+                break  # 타임아웃 시 재시도하지 않고 다음 모델로
             except requests.exceptions.RequestException as e:
                 sleep_time = (backoff_factor ** attempt) * 1.5
                 print(f"[-] Gemini API 통신 오류 ({e}). {sleep_time:.1f}초 후 재시도합니다...")
                 time.sleep(sleep_time)
                 
+    print("[-] 모든 Gemini API 모델 호출 시도가 실패했습니다.")
     return None
 
 def fact_check_article_with_sources(target_title, target_content, sources, content_label="기사"):
