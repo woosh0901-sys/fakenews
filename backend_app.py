@@ -98,6 +98,46 @@ class ReactionRequest(BaseModel):
     emoji: str
     is_canceling: Optional[bool] = False
 
+
+@app.post("/api/preview")
+async def preview_article(payload: CheckRequest):
+    """
+    분석 로딩 화면용 경량 미리보기.
+    LLM·DB를 거치지 않고 기사 제목/본문/출처만 빠르게 추출해 돌려준다.
+    (본 분석 /api/check 와 병렬로 호출되어 '분석 중' 화면에 본문을 띄우는 용도)
+    """
+    url = payload.url.strip()
+    if not url.startswith("http://") and not url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="올바른 HTTP/HTTPS URL 형식을 입력해 주세요.")
+
+    try:
+        from fact_checker_by_url import (
+            is_instagram_url, is_twitter_url,
+            scrape_instagram_post, scrape_twitter_post, scrape_url_content,
+        )
+
+        if is_instagram_url(url):
+            article, source = scrape_instagram_post(url), "인스타그램"
+        elif is_twitter_url(url):
+            article, source = scrape_twitter_post(url), "X(트위터)"
+        else:
+            article = scrape_url_content(url)
+            source = (article or {}).get("source") or ""
+
+        if not article or not article.get("content"):
+            raise HTTPException(status_code=422, detail="본문을 추출할 수 없는 페이지입니다.")
+
+        return {
+            "title": article.get("title", ""),
+            "content": article.get("content", "")[:4000],
+            "source": source,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"미리보기 추출 실패: {str(e)}")
+
+
 @app.post("/api/check")
 async def check_url(payload: CheckRequest):
     url = payload.url.strip()

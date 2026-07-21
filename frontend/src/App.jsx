@@ -43,6 +43,11 @@ export default function App() {
   // View state: 첫 접속은 랜딩, 검증 시작/대시보드 보기 클릭 시 대시보드로 전환
   const [view, setView] = useState("landing");
 
+  // 랜딩에서 검증 시작 시: 분석 로딩 화면(스피너 + 기사 본문 스캔) 상태
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisDone, setAnalysisDone] = useState(false);
+  const [preview, setPreview] = useState(null);
+
   // Data states
   const [urlInput, setUrlInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -229,20 +234,52 @@ export default function App() {
     runCheck(urlInput);
   };
 
-  // 랜딩 페이지에서 검증하기 제출 → 대시보드로 전환 후 즉시 검증 또는 AI 챗봇 실행
-  const handleLandingSubmit = (inputVal) => {
+  // 랜딩 페이지에서 검증하기 제출 → URL인 경우 분석 로딩 화면을 거쳐 대시보드로 전환하고, 일반 텍스트인 경우 AI 팩트체크 어시스턴트로 이동
+  const handleLandingSubmit = async (inputVal) => {
     const trimmed = inputVal.trim();
-    
+    if (loading || !trimmed) return;
+
     // URL 판별: http/https로 시작하거나, 공백이 없고 도메인 패턴을 포함한 경우
     const isUrl = trimmed.startsWith("http://") || 
                   trimmed.startsWith("https://") || 
                   (trimmed.split('/')[0].includes('.') && !trimmed.includes(' '));
-                  
+
     if (isUrl) {
       setUrlInput(trimmed);
-      setActiveTab("dashboard");
-      setView("dashboard");
-      runCheck(trimmed);
+      setPreview(null);
+      setAnalysisDone(false);
+      setAnalyzing(true);
+      setLoading(true);
+
+      // 로딩 화면에 띄울 기사 본문 미리보기 (실패해도 분석은 계속 진행)
+      axios
+        .post(`${API_BASE_URL}/preview`, { url: trimmed })
+        .then((res) => setPreview(res.data))
+        .catch(() => {});
+
+      try {
+        const res = await axios.post(`${API_BASE_URL}/check`, { url: trimmed });
+        await loadData();
+
+        // 완료 문구로 바뀐 것을 잠깐 보여준 뒤 대시보드로 넘어간다
+        setAnalysisDone(true);
+        setTimeout(() => {
+          setSelectedItem({
+            ...res.data,
+            title: res.data.title ?? res.data.target_title,
+            url: res.data.url ?? res.data.target_url,
+          });
+          setUrlInput("");
+          setAnalyzing(false);
+          setLoading(false);
+          setView("dashboard");
+          setActiveTab("dashboard");
+        }, 1000);
+      } catch (err) {
+        setAnalyzing(false);
+        setLoading(false);
+        alert(err.response?.data?.detail || "탐지 분석 중 기술적 에러가 발생했습니다.");
+      }
     } else {
       setActiveTab("assistant");
       setView("dashboard");
@@ -456,12 +493,15 @@ export default function App() {
         loading={loading}
         onSubmit={handleLandingSubmit}
         onOpenDashboard={() => setView("dashboard")}
+        analyzing={analyzing}
+        analysisDone={analysisDone}
+        preview={preview}
       />
     );
   }
 
   return (
-    <div className="min-h-screen xl:h-screen xl:overflow-hidden bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 flex transition-colors duration-200 font-sans">
+    <div className="view-in min-h-screen xl:h-screen xl:overflow-hidden bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 flex transition-colors duration-200 font-sans">
       
       {/* Sidebar Layout */}
       <aside className="hidden lg:flex w-80 shrink-0 flex-col bg-white dark:bg-neutral-900 border-r border-neutral-200 dark:border-neutral-800 p-6 sticky top-0 h-screen justify-between shadow-sm z-30 font-sans">
