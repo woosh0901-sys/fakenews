@@ -1,8 +1,5 @@
 @import "tailwindcss";
 
-/* 클래스 기반 다크 모드 — App.jsx가 <html>에 .dark 클래스를 토글 */
-@custom-variant dark (&:where(.dark, .dark *));
-
 /* 라틴 문자(영문·숫자·기호)만 Helvetica로 매핑하는 전용 패밀리.
    unicode-range에 한글이 없으므로 한글은 다음 폴백인 SUIT로 확정 렌더링됨 */
 @font-face {
@@ -120,12 +117,9 @@
   --shadow-xl: 0px 8px 8px -4px #0F172A1A, 0px 20px 24px -4px #0F172A24;
 }
 
-/* 스크롤 컨테이너 오버스크롤/여백에서 흰 바탕이 비치지 않도록 루트에 배경 고정 */
+/* 오버스크롤 시 지면과 다른 색이 비치지 않도록 루트 배경을 페이지와 맞춘다 */
 html {
-  background-color: var(--color-neutral-50);
-}
-html.dark {
-  background-color: var(--color-neutral-950);
+  background-color: var(--color-neutral-0);
 }
 
 body {
@@ -230,7 +224,7 @@ body {
   .spin { animation: spin 1.8s linear infinite; }
 }
 
-/* Custom scrollbars for details panel and layout */
+/* Custom scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -241,18 +235,9 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #94A3B8;
-  border-radius: 3px;
+  background: #CBD5E1;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #64748B;
-}
-
-.dark ::-webkit-scrollbar-thumb {
-  background: #334155;
-}
-
-.dark ::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+  background: #94A3B8;
 }

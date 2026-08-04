@@ -1,32 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import Landing from "./Landing";
-import { 
-  Shield, 
-  Search, 
-  Trash2, 
-  ExternalLink, 
-  TrendingUp, 
-  AlertTriangle, 
-  CheckCircle, 
-  HelpCircle, 
-  Moon, 
-  Sun, 
-  Loader2, 
-  X, 
-  Database,
-  History,
-  Info,
-  Layers,
-  ArrowRight,
-  TrendingDown,
-  Globe,
-  Clock,
-  MessageSquare,
-  Send,
-  Check,
-  AlertCircle
-} from "lucide-react";
+import { Trash2, ExternalLink, CheckCircle, Loader2, X } from "lucide-react";
+import { verdictTone, truthTone } from "./verdict";
 
 const API_BASE_URL = "/api";
 
@@ -34,11 +10,8 @@ export default function App() {
   // Timer references for memory cleanup
   const activeTimersRef = useRef([]);
 
-  // Theme state
-  const [darkMode, setDarkMode] = useState(() => {
-    return localStorage.getItem("theme") === "dark" || 
-      (!localStorage.getItem("theme") && window.matchMedia("(prefers-color-scheme: dark)").matches);
-  });
+  // 결과 섹션으로 스크롤하기 위한 참조
+  const resultRef = useRef(null);
 
   // View state: 첫 접속은 랜딩, 검증 시작/대시보드 보기 클릭 시 대시보드로 전환
   const [view, setView] = useState("landing");
@@ -62,31 +35,13 @@ export default function App() {
     avg_contradiction_score: 0
   });
 
-  // New Feature States
   const [rankings, setRankings] = useState({ most_checked: [], top_fakes: [] });
   const [comments, setComments] = useState([]);
-  const [reactions, setReactions] = useState([]);
-  const [chatHistory, setChatHistory] = useState([]);
   const [commentAuthor, setCommentAuthor] = useState("");
   const [commentContent, setCommentContent] = useState("");
-  const [chatInput, setChatInput] = useState("");
-  const [loadingChat, setLoadingChat] = useState(false);
 
-  // General Chatbot States
-  const [activeTab, setActiveTab] = useState("dashboard");
-  const [generalChatHistory, setGeneralChatHistory] = useState([
-    {
-      query: null,
-      answer: "안녕하세요! 실시간 웹 검색과 RAG-LLM 기반의 AI 팩트체커 어시스턴트입니다. 궁금한 소문, 뉴스, 루머에 대해 질문하시면 실시간으로 관련 사실을 추적하고 검증 결과를 알려드립니다. (예: '성수대교 단차 9cm 사실인가요?')",
-      sources: [],
-      isSystem: true
-    }
-  ]);
-  const [generalChatInput, setGeneralChatInput] = useState("");
-  const [loadingGeneralChat, setLoadingGeneralChat] = useState(false);
-  
   // Persistent anonymous user identity
-  const [userToken, setUserToken] = useState(() => {
+  const [userToken] = useState(() => {
     let token = localStorage.getItem("user_token");
     if (!token) {
       token = "user_" + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
@@ -94,18 +49,6 @@ export default function App() {
     }
     return token;
   });
-  const [userReactions, setUserReactions] = useState({});
-
-  // Apply theme class
-  useEffect(() => {
-    if (darkMode) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("theme", "dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("theme", "light");
-    }
-  }, [darkMode]);
 
   // Load rankings
   const loadRankings = async () => {
@@ -142,36 +85,39 @@ export default function App() {
     loadData();
   }, []);
 
-  // Load comments, reactions, and chat history when selectedItem changes
+  // 선택된 레포트의 댓글 로드 (DB에 저장되지 않은 결과는 id가 없으므로 요청하지 않는다)
   useEffect(() => {
-    if (!selectedItem) {
+    if (!selectedItem || selectedItem.id == null) {
       setComments([]);
-      setReactions([]);
-      setChatHistory([]);
-      setUserReactions({});
       return;
     }
-    
-    const loadItemDetails = async () => {
-      try {
-        const [commentsRes, reactionsRes] = await Promise.all([
-          axios.get(`${API_BASE_URL}/history/${selectedItem.id}/comments`),
-          axios.get(`${API_BASE_URL}/history/${selectedItem.id}/reactions`)
-        ]);
-        setComments(Array.isArray(commentsRes.data) ? commentsRes.data : []);
-        setReactions(Array.isArray(reactionsRes.data) ? reactionsRes.data : []);
-        setChatHistory([]);
-        
-        // Load user's local reactions for this item
-        const savedReactions = JSON.parse(localStorage.getItem(`reacted_${selectedItem.id}`) || "{}");
-        setUserReactions(savedReactions);
-      } catch (err) {
-        console.error("댓글/리액션 로드 실패:", err);
-      }
+    let cancelled = false;
+    axios
+      .get(`${API_BASE_URL}/history/${selectedItem.id}/comments`)
+      .then((res) => {
+        if (!cancelled) setComments(Array.isArray(res.data) ? res.data : []);
+      })
+      .catch((err) => {
+        console.error("댓글 로드 실패:", err);
+        if (!cancelled) setComments([]);
+      });
+    return () => {
+      cancelled = true;
     };
-    
-    loadItemDetails();
-  }, [selectedItem]);
+  }, [selectedItem?.id]);
+
+  // 결과가 열리면(검증 완료 / 히스토리 클릭) 결과 섹션을 화면 위로 가져온다
+  useEffect(() => {
+    if (view !== "dashboard" || !selectedItem) return;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const raf = requestAnimationFrame(() => {
+      const el = resultRef.current;
+      if (!el) return;
+      el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+      el.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [selectedItem?.id, selectedItem?.url, view]);
 
   // Cleanup all active timers on unmount
   useEffect(() => {
@@ -181,7 +127,7 @@ export default function App() {
     };
   }, []);
 
-  // 검증 실행 (대시보드 폼과 랜딩 페이지 양쪽에서 사용)
+  // 검증 실행 (대시보드 폼에서 사용)
   const runCheck = async (targetUrl) => {
     if (loading || !targetUrl.trim()) return;
 
@@ -191,11 +137,11 @@ export default function App() {
 
     setLoading(true);
     setActiveStep(1);
-    
+
     // Simulate steps visually to guide the user through the pipeline
     const t2 = setTimeout(() => setActiveStep(2), 1500);
     const t3 = setTimeout(() => setActiveStep(3), 3000);
-    
+
     activeTimersRef.current = [t2, t3];
 
     try {
@@ -203,22 +149,20 @@ export default function App() {
       activeTimersRef.current.forEach(clearTimeout);
       activeTimersRef.current = [];
       setActiveStep(4);
-      
-      // Delay slightly so user sees step 5 (success) before update
+
       const tSuccess = setTimeout(async () => {
         setUrlInput("");
         setLoading(false);
         await loadData();
-        // /api/check 응답은 target_title/target_url 키를 사용하므로 패널 표시용 필드로 정규화
+        // /api/check 응답은 target_title/target_url 키를 사용하므로 표시용 필드로 정규화
         setSelectedItem({
           ...res.data,
           title: res.data.title ?? res.data.target_title,
           url: res.data.url ?? res.data.target_url,
         });
       }, 500);
-      
+
       activeTimersRef.current.push(tSuccess);
-      
     } catch (err) {
       activeTimersRef.current.forEach(clearTimeout);
       activeTimersRef.current = [];
@@ -234,57 +178,44 @@ export default function App() {
     runCheck(urlInput);
   };
 
-  // 랜딩 페이지에서 검증하기 제출 → URL인 경우 분석 로딩 화면을 거쳐 대시보드로 전환하고, 일반 텍스트인 경우 AI 팩트체크 어시스턴트로 이동
+  // 랜딩에서 검증 제출 → 분석 로딩 화면을 거쳐 대시보드로 전환 (Landing이 URL 형식을 미리 검사한다)
   const handleLandingSubmit = async (inputVal) => {
     const trimmed = inputVal.trim();
     if (loading || !trimmed) return;
 
-    // URL 판별: http/https로 시작하거나, 공백이 없고 도메인 패턴을 포함한 경우
-    const isUrl = trimmed.startsWith("http://") || 
-                  trimmed.startsWith("https://") || 
-                  (trimmed.split('/')[0].includes('.') && !trimmed.includes(' '));
+    setUrlInput(trimmed);
+    setPreview(null);
+    setAnalysisDone(false);
+    setAnalyzing(true);
+    setLoading(true);
 
-    if (isUrl) {
-      setUrlInput(trimmed);
-      setPreview(null);
-      setAnalysisDone(false);
-      setAnalyzing(true);
-      setLoading(true);
+    // 로딩 화면에 띄울 기사 본문 미리보기 (실패해도 분석은 계속 진행)
+    axios
+      .post(`${API_BASE_URL}/preview`, { url: trimmed })
+      .then((res) => setPreview(res.data))
+      .catch(() => {});
 
-      // 로딩 화면에 띄울 기사 본문 미리보기 (실패해도 분석은 계속 진행)
-      axios
-        .post(`${API_BASE_URL}/preview`, { url: trimmed })
-        .then((res) => setPreview(res.data))
-        .catch(() => {});
+    try {
+      const res = await axios.post(`${API_BASE_URL}/check`, { url: trimmed });
+      await loadData();
 
-      try {
-        const res = await axios.post(`${API_BASE_URL}/check`, { url: trimmed });
-        await loadData();
-
-        // 완료 문구로 바뀐 것을 잠깐 보여준 뒤 대시보드로 넘어간다
-        setAnalysisDone(true);
-        setTimeout(() => {
-          setSelectedItem({
-            ...res.data,
-            title: res.data.title ?? res.data.target_title,
-            url: res.data.url ?? res.data.target_url,
-          });
-          setUrlInput("");
-          setAnalyzing(false);
-          setLoading(false);
-          setView("dashboard");
-          setActiveTab("dashboard");
-        }, 1000);
-      } catch (err) {
+      // 완료 문구로 바뀐 것을 잠깐 보여준 뒤 대시보드로 넘어간다
+      setAnalysisDone(true);
+      setTimeout(() => {
+        setSelectedItem({
+          ...res.data,
+          title: res.data.title ?? res.data.target_title,
+          url: res.data.url ?? res.data.target_url,
+        });
+        setUrlInput("");
         setAnalyzing(false);
         setLoading(false);
-        alert(err.response?.data?.detail || "탐지 분석 중 기술적 에러가 발생했습니다.");
-      }
-    } else {
-      setActiveTab("assistant");
-      setView("dashboard");
-      setSelectedItem(null);
-      handleGeneralChatSubmit(null, trimmed);
+        setView("dashboard");
+      }, 1000);
+    } catch (err) {
+      setAnalyzing(false);
+      setLoading(false);
+      alert(err.response?.data?.detail || "탐지 분석 중 기술적 에러가 발생했습니다.");
     }
   };
 
@@ -306,12 +237,12 @@ export default function App() {
   const handleAddComment = async (e) => {
     e.preventDefault();
     if (!commentContent.trim() || !selectedItem) return;
-    
-    if (selectedItem.id === null || selectedItem.id === undefined) {
+
+    if (selectedItem.id == null) {
       alert("데이터베이스에 저장되지 않은 검사 결과에는 댓글을 남길 수 없습니다. (Supabase 연결 상태나 환경 변수 설정 (.env)을 확인해 주세요.)");
       return;
     }
-    
+
     const author = commentAuthor.trim() || "익명";
     try {
       const res = await axios.post(`${API_BASE_URL}/history/${selectedItem.id}/comments`, {
@@ -341,141 +272,6 @@ export default function App() {
     }
   };
 
-  const handleAddReaction = async (emoji) => {
-    if (!selectedItem) return;
-    
-    if (selectedItem.id === null || selectedItem.id === undefined) {
-      alert("데이터베이스에 저장되지 않은 검사 결과에는 리액션을 남길 수 없습니다. (Supabase 연결 상태나 환경 변수 설정 (.env)을 확인해 주세요.)");
-      return;
-    }
-    
-    const isAlreadyReacted = !!userReactions[emoji];
-    
-    try {
-      const res = await axios.post(`${API_BASE_URL}/history/${selectedItem.id}/reactions`, {
-        emoji,
-        is_canceling: isAlreadyReacted
-      });
-      
-      const updatedUserReactions = { ...userReactions };
-      if (isAlreadyReacted) {
-        delete updatedUserReactions[emoji];
-      } else {
-        updatedUserReactions[emoji] = true;
-      }
-      setUserReactions(updatedUserReactions);
-      localStorage.setItem(`reacted_${selectedItem.id}`, JSON.stringify(updatedUserReactions));
-      
-      const updatedReactions = [...reactions];
-      const idx = updatedReactions.findIndex(r => r.emoji === emoji);
-      if (idx > -1) {
-        updatedReactions[idx].count = res.data.count;
-      } else {
-        updatedReactions.push(res.data);
-      }
-      setReactions(updatedReactions);
-    } catch (err) {
-      const errMsg = err.response?.data?.detail || err.message || "알 수 없는 에러";
-      alert("리액션 저장 실패: " + errMsg);
-    }
-  };
-
-  const handleChatSubmit = async (e) => {
-    e.preventDefault();
-    if (!chatInput.trim() || loadingChat || !selectedItem) return;
-    
-    if (selectedItem.id === null || selectedItem.id === undefined) {
-      alert("데이터베이스에 저장되지 않은 검사 결과에는 Q&A 질문을 할 수 없습니다. (Supabase 연결 상태나 환경 변수 설정 (.env)을 확인해 주세요.)");
-      return;
-    }
-    
-    const query = chatInput.trim();
-    setChatInput("");
-    setLoadingChat(true);
-    
-    const tempChat = [...chatHistory, { query, answer: null, loading: true }];
-    setChatHistory(tempChat);
-    
-    try {
-      const res = await axios.post(`${API_BASE_URL}/check/${selectedItem.id}/query`, {
-        query
-      });
-      
-      setChatHistory(prev => prev.map(item => 
-        item.query === query && item.loading 
-          ? { query, answer: res.data.answer, loading: false } 
-          : item
-      ));
-    } catch (err) {
-      const errMsg = err.response?.data?.detail || err.message || "추가 분석 중 에러가 발생했습니다.";
-      setChatHistory(prev => prev.map(item => 
-        item.query === query && item.loading 
-          ? { query, answer: `추가 분석 중 에러가 발생했습니다. (이유: ${errMsg})`, loading: false } 
-          : item
-      ));
-    } finally {
-      setLoadingChat(false);
-    }
-  };
-
-  const handleGeneralChatSubmit = async (e, customQuery = null) => {
-    if (e) e.preventDefault();
-    const query = (customQuery || generalChatInput).trim();
-    if (!query || loadingGeneralChat) return;
-
-    setGeneralChatInput("");
-    setLoadingGeneralChat(true);
-
-    const tempChat = [...generalChatHistory, { query, answer: null, sources: [], loading: true }];
-    setGeneralChatHistory(tempChat);
-
-    try {
-      const res = await axios.post(`${API_BASE_URL}/chat`, { query });
-      setGeneralChatHistory(prev => prev.map(item => 
-        item.query === query && item.loading 
-          ? { query, answer: res.data.answer, sources: res.data.sources, loading: false } 
-          : item
-      ));
-    } catch (err) {
-      const errMsg = err.response?.data?.detail || err.message || "답변을 불러오지 못했습니다.";
-      setGeneralChatHistory(prev => prev.map(item => 
-        item.query === query && item.loading 
-          ? { query, answer: `분석 중 에러가 발생했습니다: ${errMsg}`, sources: [], loading: false } 
-          : item
-      ));
-    } finally {
-      setLoadingGeneralChat(false);
-    }
-  };
-
-  // Badge helpers
-  const getVerdictBadge = (verdict) => {
-    switch (verdict) {
-      case "REAL":
-        return (
-          <span className="flex items-center gap-1.5 w-fit bg-success-50 dark:bg-success-950/30 text-success-700 dark:text-success-400 text-xs px-2.5 py-1 rounded-full font-bold border border-success-500/25 dark:border-success-500/25">
-            <span className="w-1.5 h-1.5 rounded-full bg-success-500 animate-pulse"></span>
-            진짜 뉴스
-          </span>
-        );
-      case "FAKE":
-        return (
-          <span className="flex items-center gap-1.5 w-fit bg-error-50 dark:bg-error-950/30 text-error-600 dark:text-error-400 text-xs px-2.5 py-1 rounded-full font-bold border border-error-500/25 dark:border-error-500/25">
-            <span className="w-1.5 h-1.5 rounded-full bg-error-500 animate-pulse"></span>
-            가짜 뉴스
-          </span>
-        );
-      case "SUSPICIOUS":
-      default:
-        return (
-          <span className="flex items-center gap-1.5 w-fit bg-warning-50 dark:bg-warning-950/30 text-warning-700 dark:text-warning-400 text-xs px-2.5 py-1 rounded-full font-bold border border-warning-500/25 dark:border-warning-500/25">
-            <span className="w-1.5 h-1.5 rounded-full bg-warning-500 animate-pulse"></span>
-            의심/과장
-          </span>
-        );
-    }
-  };
-
   // Loader steps definition
   const loaderSteps = [
     { label: "1. 본문 수집", desc: "웹페이지 크롤링 및 전처리" },
@@ -487,8 +283,6 @@ export default function App() {
   if (view === "landing") {
     return (
       <Landing
-        darkMode={darkMode}
-        setDarkMode={setDarkMode}
         history={history}
         loading={loading}
         onSubmit={handleLandingSubmit}
@@ -500,872 +294,517 @@ export default function App() {
     );
   }
 
+  const total = Math.max(Number(stats.total_checks) || 0, 1);
+  const pct = (n) => ((Number(n) || 0) / total) * 100;
+
+  const tone = selectedItem ? verdictTone(selectedItem.verdict) : null;
+  const score = selectedItem ? Number(selectedItem.contradiction_score ?? 0) : 0;
+  const sources = selectedItem?.sources ?? [];
+
+  // 공통 클래스
+  const kicker = "text-[11px] font-bold uppercase tracking-[0.18em]";
+  const subKicker = `${kicker} text-neutral-500`;
+  const inkButton =
+    "shrink-0 bg-neutral-900 text-white px-6 md:px-8 py-3 text-[12px] font-bold uppercase tracking-[0.14em] hover:bg-brand-500 active:bg-brand-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2";
+  const smallInput =
+    "min-w-0 bg-transparent border-0 border-b border-neutral-300 px-0 py-2 text-sm placeholder:text-neutral-400 focus:outline-none focus:border-neutral-900 transition-colors";
+  const editorialLink =
+    "text-neutral-900 underline underline-offset-[3px] decoration-neutral-300 hover:decoration-brand-500 transition-colors";
+
   return (
-    <div className="view-in min-h-screen xl:h-screen xl:overflow-hidden bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 flex transition-colors duration-200 font-sans">
-      
-      {/* Sidebar Layout */}
-      <aside className="hidden lg:flex w-80 shrink-0 flex-col bg-white dark:bg-neutral-900 border-r border-neutral-200 dark:border-neutral-800 p-6 sticky top-0 h-screen justify-between shadow-sm z-30 font-sans">
-        <div className="space-y-8">
-          
-          {/* Logo (클릭 시 랜딩으로 복귀) */}
-          <div
-            className="flex items-center gap-3 cursor-pointer"
-            onClick={() => setView("landing")}
-            title="메인 페이지로 이동"
-          >
-            <div className="p-2.5 bg-brand-500 dark:bg-brand-400 rounded-lg text-white shadow-md shadow-brand-500/20">
-              <Shield size={24} />
-            </div>
-            <div>
-              <h1 className="text-lg font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-brand-500 via-brand-400 to-secondary-600 dark:from-brand-300 dark:via-brand-200 dark:to-secondary-400">
-                Fake News Defender
-              </h1>
-              <p className="text-[10px] text-neutral-400 font-semibold tracking-wider uppercase mt-0.5">Hybrid Fact-Checker</p>
-            </div>
-          </div>
-          
-          {/* Navigation Menu */}
-          <div className="space-y-1">
-            <button
-              onClick={() => setActiveTab("dashboard")}
-              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-xs font-bold transition-all ${
-                activeTab === "dashboard"
-                  ? "bg-brand-500 text-white shadow-md shadow-brand-500/15"
-                  : "text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-              }`}
-            >
-              <Database size={14} />
-              신뢰도 대시보드
-            </button>
-            <button
-              onClick={() => {
-                setActiveTab("assistant");
-                setSelectedItem(null); // Clear selected item diagnostic panel when chatting
-              }}
-              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-xs font-bold transition-all ${
-                activeTab === "assistant"
-                  ? "bg-brand-500 text-white shadow-md shadow-brand-500/15"
-                  : "text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-              }`}
-            >
-              <MessageSquare size={14} />
-              AI 팩트체크 어시스턴트
-            </button>
-          </div>
-
-          {/* Stats Section */}
-          <div className="space-y-4">
-            <h2 className="text-xs font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-widest">실시간 탐지 현황</h2>
-            
-            {/* 총 검사 + 판정 분포 스택 바 (한눈에 비율 파악) */}
-            <div className="bg-neutral-50 dark:bg-neutral-800 border border-neutral-200/60 dark:border-neutral-800 rounded-lg p-4 shadow-sm space-y-3.5">
-              <div className="flex items-baseline justify-between">
-                <span className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider">총 검사</span>
-                <span className="text-2xl font-bold font-mono text-neutral-950 dark:text-neutral-50 leading-none">{stats.total_checks}</span>
-              </div>
-
-              <div className="flex h-2 w-full rounded-full overflow-hidden bg-neutral-200 dark:bg-neutral-700">
-                <div className="bg-success-500 transition-all duration-500" style={{ width: `${(stats.real_count / Math.max(stats.total_checks, 1)) * 100}%` }} />
-                <div className="bg-error-500 transition-all duration-500" style={{ width: `${(stats.fake_count / Math.max(stats.total_checks, 1)) * 100}%` }} />
-                <div className="bg-warning-500 transition-all duration-500" style={{ width: `${(stats.suspicious_count / Math.max(stats.total_checks, 1)) * 100}%` }} />
-              </div>
-
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <div className="flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-success-500 shrink-0" />
-                    <span className="text-[10px] text-neutral-500 dark:text-neutral-400 font-bold">진짜</span>
-                  </div>
-                  <p className="text-lg font-bold font-mono text-success-600 dark:text-success-400 mt-0.5 leading-none">{stats.real_count}</p>
-                </div>
-                <div>
-                  <div className="flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-error-500 shrink-0" />
-                    <span className="text-[10px] text-neutral-500 dark:text-neutral-400 font-bold">가짜</span>
-                  </div>
-                  <p className="text-lg font-bold font-mono text-error-600 dark:text-error-400 mt-0.5 leading-none">{stats.fake_count}</p>
-                </div>
-                <div>
-                  <div className="flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-warning-500 shrink-0" />
-                    <span className="text-[10px] text-neutral-500 dark:text-neutral-400 font-bold">의심</span>
-                  </div>
-                  <p className="text-lg font-bold font-mono text-warning-600 dark:text-warning-400 mt-0.5 leading-none">{stats.suspicious_count}</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Performance Averages */}
-            <div className="bg-neutral-50 dark:bg-neutral-800 border border-neutral-200/60 dark:border-neutral-800 rounded-lg p-4 space-y-3">
-              <div className="flex justify-between items-center text-xs">
-                <span className="text-neutral-500 dark:text-neutral-400 font-medium">평균 모순 점수</span>
-                <span className="font-mono font-bold text-neutral-950 dark:text-neutral-50">{stats.avg_contradiction_score.toFixed(2)}</span>
-              </div>
-              <div className="w-full bg-neutral-200 dark:bg-neutral-800 h-1.5 rounded-full overflow-hidden">
-                <div 
-                  className="bg-brand-500 dark:bg-brand-400 h-full transition-all duration-500" 
-                  style={{ width: `${stats.avg_contradiction_score * 100}%` }}
-                />
-              </div>
-              {/* Avg NLL stats removed */}
-            </div>
-
-          </div>
-
-        </div>
-
-        {/* Sidebar Footer */}
-        <div className="pt-4 border-t border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
-          <span className="text-xs text-neutral-400 dark:text-neutral-500 font-medium">Powered by Gemini 2.5</span>
-          <button 
-            onClick={() => setDarkMode(!darkMode)}
-            className="p-2 border border-neutral-200 dark:border-neutral-800 rounded-md hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors text-neutral-500 dark:text-neutral-400"
-          >
-            {darkMode ? <Sun size={16} /> : <Moon size={16} />}
-          </button>
-        </div>
-      </aside>
-
-      {/* Main Content Pane */}
-      <div className="flex-1 flex flex-col min-w-0 xl:min-h-0">
-        
-        {/* Mobile Header */}
-        <header className="lg:hidden flex justify-between items-center px-6 py-4 border-b border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 z-20">
+    <div className="min-h-screen bg-neutral-0 text-neutral-900 font-sans">
+      {/* 마스트헤드 */}
+      <header className="sticky top-0 z-30 bg-neutral-0 border-b border-neutral-900">
+        <div className="mx-auto w-full max-w-[1100px] px-6 md:px-10 h-14 flex items-center justify-between gap-4">
           <button
             type="button"
             onClick={() => setView("landing")}
             title="메인 페이지로 이동"
-            className="flex items-center gap-2"
+            className="text-[17px] font-black uppercase tracking-[-0.01em] text-brand-500 hover:text-neutral-900 transition-colors"
           >
-            <div className="p-1.5 bg-brand-500 rounded-md text-white">
-              <Shield size={18} />
-            </div>
-            <span className="font-bold text-sm">Fake News Defender</span>
+            Fake News Defender
           </button>
-          <button 
-            onClick={() => setDarkMode(!darkMode)}
-            className="p-2 border border-neutral-200 dark:border-neutral-800 rounded-md hover:bg-neutral-100 dark:hover:bg-neutral-800"
-          >
-            {darkMode ? <Sun size={16} /> : <Moon size={16} />}
-          </button>
-        </header>
+          <span className={`hidden sm:block ${kicker} text-neutral-400`}>Hybrid Fact-Checker</span>
+        </div>
+      </header>
 
-        {/* Content Wrapper */}
-        <div className="flex-1 flex flex-col xl:flex-row overflow-x-hidden min-h-0">
-          
-          {activeTab === "dashboard" ? (
-            <>
-              {/* Dashboard Body (Left/Center) */}
-          <div className={`flex-1 p-6 space-y-6 overflow-y-auto max-w-full ${selectedItem ? "xl:w-2/3" : "w-full"} transition-all duration-300`}>
-            
-            {/* Search/URL Input Box - Sleek Google-Search style */}
-            <section className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800/80 rounded-lg p-5 shadow-sm relative overflow-hidden">
-              <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-brand-500 via-brand-400 to-secondary-500"></div>
-
-              <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold tracking-tight text-neutral-950 dark:text-neutral-50">인공지능 교차 검증</h2>
-                <span className="text-[11px] text-neutral-400 dark:text-neutral-500 font-medium">기사·인스타그램·X(트위터) 링크를 넣으면 1차 통계 + 2차 실시간 웹 대조로 판정합니다.</span>
-              </div>
-
-              <form onSubmit={handleCheck} className="flex gap-2.5 mt-3.5">
-                <div className="relative flex-1">
-                  <input 
-                    type="url" 
-                    value={urlInput}
-                    onChange={(e) => setUrlInput(e.target.value)}
-                    placeholder="검증하려는 기사, 인스타그램·X(트위터) 게시물 링크(https://...)를 입력해 주세요."
-                    required
-                    disabled={loading}
-                    className="w-full bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-lg pl-11 pr-4 py-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 dark:focus:ring-brand-400/30 dark:focus:border-brand-400 transition-all text-neutral-950 dark:text-neutral-100 shadow-inner"
-                  />
-                  <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400" />
-                </div>
-                <button 
-                  type="submit"
-                  disabled={loading}
-                  className="bg-brand-500 hover:bg-brand-600 active:bg-brand-700 text-white rounded-md px-7 py-3.5 font-bold transition-all shadow-sm shadow-brand-500/10 disabled:opacity-40 disabled:cursor-not-allowed text-sm shrink-0 flex items-center justify-center gap-1.5"
-                >
-                  {loading ? (
-                    <>
-                      <Loader2 size={16} className="animate-spin" />
-                      검색 중
-                    </>
-                  ) : (
-                    "신뢰도 검증"
-                  )}
-                </button>
-              </form>
-
-              {/* Dynamic Loading Timeline/Stepper */}
-              {loading && (
-                <div className="mt-6 pt-6 border-t border-neutral-100 dark:border-neutral-800/80 space-y-4">
-                  <div className="flex items-center justify-between text-xs font-bold text-neutral-400 uppercase tracking-widest">
-                    <span>하이브리드 탐지 파이프라인 분석 단계</span>
-                    <span className="text-brand-500 dark:text-brand-300 flex items-center gap-1.5 animate-pulse">
-                      <span className="w-1.5 h-1.5 rounded-full bg-brand-500 dark:bg-brand-300"></span>
-                      실시간 구동 중
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                    {loaderSteps.map((step, idx) => {
-                      const isCompleted = activeStep > idx + 1;
-                      const isActive = activeStep === idx + 1;
-                      return (
-                        <div 
-                          key={idx}
-                          className={`border rounded-lg p-3.5 transition-all duration-300 flex flex-col justify-between ${
-                            isActive 
-                              ? "bg-brand-50/60 dark:bg-brand-900/30 border-brand-500/50 dark:border-brand-300/30 shadow-[0_0_15px_rgba(30,58,95,0.08)]" 
-                              : isCompleted
-                                ? "bg-neutral-50/50 dark:bg-neutral-900/30 border-success-500/30 dark:border-success-500/20"
-                                : "bg-neutral-50/30 dark:bg-neutral-900/10 border-neutral-200 dark:border-neutral-800/60 opacity-60"
-                          }`}
-                        >
-                          <div className="flex justify-between items-center">
-                            <span className={`text-[10px] font-bold uppercase tracking-wider ${
-                              isActive ? "text-brand-600 dark:text-brand-300" : isCompleted ? "text-success-700 dark:text-success-400" : "text-neutral-400"
-                            }`}>
-                              {step.label}
-                            </span>
-                            {isCompleted && (
-                              <CheckCircle size={14} className="text-success-500 shrink-0" />
-                            )}
-                            {isActive && (
-                              <Loader2 size={14} className="animate-spin text-brand-500 dark:text-brand-300 shrink-0" />
-                            )}
-                          </div>
-                          <p className="text-xs text-neutral-500 dark:text-neutral-400 font-medium mt-1">{step.desc}</p>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
+      <main className="view-in mx-auto w-full max-w-[1100px] px-6 md:px-10 pb-28">
+        {/* §A 검증 입력 */}
+        <section className="pt-8 md:pt-10">
+          <h1 className={`${kicker} text-neutral-500`}>인공지능 교차 검증</h1>
+          <form onSubmit={handleCheck} className="mt-3 flex items-end gap-3 md:gap-5">
+            <input
+              type="url"
+              value={urlInput}
+              onChange={(e) => setUrlInput(e.target.value)}
+              placeholder="검증할 뉴스·인스타그램·X 링크를 붙여 넣으세요"
+              required
+              disabled={loading}
+              className="flex-1 min-w-0 bg-transparent border-0 border-b-2 border-neutral-900 px-0 py-3 text-base md:text-lg text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:border-brand-500 transition-colors disabled:opacity-40"
+            />
+            <button type="submit" disabled={loading} className={inkButton}>
+              {loading ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" />
+                  검증 중
+                </>
+              ) : (
+                "검증"
               )}
-            </section>
+            </button>
+          </form>
+          <p className="mt-2.5 text-[11px] leading-[1.6] text-neutral-500 max-w-[68ch]">
+            실시간 웹 검색으로 수집한 보도와 대조해 판정합니다.
+          </p>
 
-            {/* Real-time Rankings Grid */}
-            <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              
-              {/* Most Checked Rankings */}
-              <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800/80 rounded-lg p-5 shadow-sm space-y-4">
-                <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
-                  <TrendingUp size={16} className="text-info-500 dark:text-info-400" />
-                  실시간 가장 많이 검증된 기사 (Top 5)
-                </h3>
-                <div className="space-y-2">
-                  {(rankings.most_checked || []).length === 0 ? (
-                    <p className="text-xs text-neutral-400 py-4 text-center">검증 통계가 없습니다.</p>
-                  ) : (
-                    (rankings.most_checked || []).map((item, idx) => (
-                      <div
-                        key={idx}
-                        onClick={() => {
-                          const matched = history.find(h => h.url === item.url);
-                          if (matched) setSelectedItem(matched);
-                        }}
-                        className="flex items-center justify-between gap-3 text-xs p-3 bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200/60 dark:border-neutral-800 rounded-lg hover:border-info-500/40 dark:hover:border-info-400/40 cursor-pointer transition-colors"
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <span className="font-mono font-bold text-info-600 dark:text-info-400 bg-info-50 dark:bg-info-950/40 px-2 py-0.5 rounded text-[10px] shrink-0">
-                            {idx + 1}
-                          </span>
-                          <span className="font-bold text-neutral-900 dark:text-neutral-100 truncate flex-1 block leading-tight">{item.title}</span>
-                        </div>
-                        <span className="text-[10px] text-neutral-500 dark:text-neutral-400 shrink-0 font-bold bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 rounded-full">
-                          {item.count}회
-                        </span>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* Top Fakes Rankings */}
-              <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800/80 rounded-lg p-5 shadow-sm space-y-4">
-                <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
-                  <AlertTriangle size={16} className="text-error-500 dark:text-error-400" />
-                  실시간 모순율이 가장 높은 거짓 기사 (Top 5)
-                </h3>
-                <div className="space-y-2">
-                  {(rankings.top_fakes || []).length === 0 ? (
-                    <p className="text-xs text-neutral-400 py-4 text-center">검출된 거짓 기사가 없습니다.</p>
-                  ) : (
-                    (rankings.top_fakes || []).map((item, idx) => (
-                      <div
-                        key={idx}
-                        onClick={() => {
-                          const matched = history.find(h => h.url === item.url);
-                          if (matched) setSelectedItem(matched);
-                        }}
-                        className="flex items-center justify-between gap-3 text-xs p-3 bg-error-50/40 dark:bg-error-950/15 border border-error-500/15 dark:border-error-500/15 rounded-lg hover:border-error-500/40 dark:hover:border-error-400/40 cursor-pointer transition-colors"
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <span className="font-mono font-bold text-error-600 dark:text-error-400 bg-error-50 dark:bg-error-950/40 px-2 py-0.5 rounded text-[10px] shrink-0">
-                            {idx + 1}
-                          </span>
-                          <span className="font-bold text-neutral-900 dark:text-neutral-100 truncate flex-1 block leading-tight">{item.title}</span>
-                        </div>
-                        <span className="text-[10px] text-error-600 dark:text-error-400 shrink-0 font-bold bg-error-50 dark:bg-error-950/40 px-2 py-0.5 rounded-full">
-                          모순율 {(item.contradiction_score * 100).toFixed(0)}%
-                        </span>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-            </section>
-
-            {/* History Table Container */}
-            <section className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800/80 rounded-lg shadow-sm overflow-hidden">
-              <div className="p-5 border-b border-neutral-200 dark:border-neutral-800/60 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <History size={18} className="text-neutral-400" />
-                  <h2 className="text-md font-bold tracking-tight text-neutral-950 dark:text-neutral-50">검증 히스토리</h2>
-                </div>
-                <span className="text-xs font-mono bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 px-2 py-0.5 rounded-md font-bold">
-                  기록 수: {history.length}건
+          {/* 파이프라인 스테퍼 */}
+          {loading && (
+            <div className="mt-8 border-t border-neutral-200 pt-4">
+              <div className="flex items-baseline justify-between gap-4">
+                <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-neutral-500">
+                  하이브리드 탐지 파이프라인
+                </span>
+                <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-neutral-900 animate-pulse">
+                  실시간 구동 중
                 </span>
               </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm whitespace-nowrap">
-                  <thead className="bg-neutral-50 dark:bg-neutral-900/20 text-neutral-500 dark:text-neutral-400 border-b border-neutral-200 dark:border-neutral-800">
-                    <tr>
-                      <th className="p-4 font-bold text-xs uppercase tracking-wider">판정 결과</th>
-                      <th className="p-4 font-bold text-xs uppercase tracking-wider">기사 제목 / 주소</th>
-                      <th className="p-4 font-bold text-xs uppercase tracking-wider text-center">모순 점수</th>
-                      <th className="p-4 font-bold text-xs uppercase tracking-wider text-right">삭제</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800/60">
-                    {history.length === 0 ? (
-                      <tr>
-                        <td colSpan="4" className="p-12 text-center text-neutral-500 dark:text-neutral-400 font-medium">
-                          검증 기록이 존재하지 않습니다. 뉴스 링크를 입력하여 신뢰도를 판정해 보세요.
-                        </td>
-                      </tr>
-                    ) : (
-                      history.map((item) => {
-                        const isSelected = selectedItem?.id === item.id;
-                        return (
-                          <tr 
-                            key={item.id}
-                            onClick={() => setSelectedItem(item)}
-                            className={`hover:bg-neutral-50/50 dark:hover:bg-neutral-900/20 cursor-pointer transition-colors ${
-                              isSelected ? "bg-brand-50/60 dark:bg-brand-900/25 hover:bg-brand-50/80 dark:hover:bg-brand-900/35" : ""
-                            }`}
-                          >
-                            <td className="p-4">{getVerdictBadge(item.verdict)}</td>
-                            <td className="p-4 max-w-sm md:max-w-md truncate">
-                              <span className="block text-neutral-950 dark:text-neutral-50 font-bold leading-tight truncate">{item.title}</span>
-                              <span className="text-xs text-neutral-400 font-medium truncate block mt-0.5 max-w-xs md:max-w-md">{item.url}</span>
-                            </td>
-                            <td className="p-4 text-center font-mono font-bold text-xs">
-                              <div className="flex items-center justify-center gap-1.5">
-                                <span className={item.contradiction_score > 0.6 ? "text-error-500" : item.contradiction_score > 0.2 ? "text-warning-500" : "text-success-500"}>
-                                  {item.contradiction_score.toFixed(2)}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="p-4 text-right">
-                              <button 
-                                onClick={(e) => handleDelete(item.id, e)}
-                                className="text-neutral-400 hover:text-error-500 p-1.5 rounded-md hover:bg-neutral-100 dark:hover:bg-neutral-800/80 transition-colors"
-                              >
-                                <Trash2 size={15} />
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-          </div>
-
-          {/* Details Diagnostic Slide-over Panel (Right) */}
-          {selectedItem && (
-            <div className="w-full xl:w-[450px] shrink-0 bg-white dark:bg-neutral-900 border-t xl:border-t-0 xl:border-l border-neutral-200 dark:border-neutral-800 p-6 space-y-6 overflow-y-auto z-20 shadow-lg relative flex flex-col justify-between">
-              
-              <div className="space-y-6">
-                
-                {/* Panel Header */}
-                <div className="flex justify-between items-start border-b border-neutral-200 dark:border-neutral-800/80 pb-4">
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-widest">정밀 진단 레포트</p>
-                    <div className="flex items-center gap-2">
-                      {getVerdictBadge(selectedItem.verdict)}
-                      {selectedItem.id != null && (
-                        <span className="text-xs bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 px-2 py-0.5 rounded font-mono font-bold">
-                          #{selectedItem.id}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => setSelectedItem(null)}
-                    className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 p-1.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-md transition-colors border border-neutral-200 dark:border-neutral-800"
-                  >
-                    <X size={16} />
-                  </button>
-                </div>
-
-                {/* Article info block */}
-                <div className="space-y-2">
-                  <h3 className="text-md font-bold tracking-tight text-neutral-950 dark:text-neutral-50 leading-snug">
-                    {selectedItem.title}
-                  </h3>
-                  <div className="flex flex-wrap gap-x-4 gap-y-1">
-                    <a 
-                      href={selectedItem.url} 
-                      target="_blank" 
-                      rel="noreferrer"
-                      className="flex items-center gap-1.5 text-xs text-brand-600 dark:text-brand-300 hover:underline font-bold"
+              <ol className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-x-8 gap-y-3">
+                {loaderSteps.map((step, idx) => {
+                  const isCompleted = activeStep > idx + 1;
+                  const isActive = activeStep === idx + 1;
+                  return (
+                    <li
+                      key={idx}
+                      className={`border-t-2 pt-2 ${isActive || isCompleted ? "border-neutral-900" : "border-neutral-200"}`}
                     >
-                      <Globe size={12} /> 원문 보도 보기 <ExternalLink size={10} />
-                    </a>
-                    {selectedItem.created_at && (
-                      <span className="text-[11px] text-neutral-400 font-semibold flex items-center gap-1">
-                        <Clock size={12} /> {new Date(selectedItem.created_at).toLocaleString()}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Diagnostic Meters */}
-                <div className="grid grid-cols-2 gap-3.5">
-                  <div className="bg-neutral-50 dark:bg-neutral-800 border border-neutral-200/60 dark:border-neutral-800 rounded-lg p-4 shadow-sm space-y-1">
-                    <p className="text-[10px] text-neutral-400 dark:text-neutral-500 font-bold uppercase tracking-wider">주장 모순율</p>
-                    <div className="flex items-baseline gap-1 pt-1">
-                      <span className={`text-2xl font-bold font-mono ${
-                        selectedItem.contradiction_score > 0.6 ? "text-error-500" : selectedItem.contradiction_score > 0.2 ? "text-warning-500" : "text-success-500"
-                      }`}>
-                        {(selectedItem.contradiction_score * 100).toFixed(0)}%
-                      </span>
-                    </div>
-                    {/* Progress Bar inside panel */}
-                    <div className="w-full bg-neutral-200 dark:bg-neutral-800 h-1.5 rounded-full mt-2.5 overflow-hidden">
-                      <div 
-                        className={`h-full transition-all duration-500 ${
-                          selectedItem.contradiction_score > 0.6 
-                            ? "bg-error-500" 
-                            : selectedItem.contradiction_score > 0.2 
-                              ? "bg-warning-500" 
-                              : "bg-success-500"
-                        }`}
-                        style={{ width: `${selectedItem.contradiction_score * 100}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="bg-neutral-50 dark:bg-neutral-800 border border-neutral-200/60 dark:border-neutral-800 rounded-lg p-4 shadow-sm space-y-1">
-                    <p className="text-[10px] text-neutral-400 dark:text-neutral-500 font-bold uppercase tracking-wider">검증 방법</p>
-                    <div className="flex items-baseline gap-1 pt-1">
-                      <span className="text-md font-bold text-neutral-900 dark:text-neutral-100">
-                        실시간 RAG 기사 대조
-                      </span>
-                    </div>
-                    <span className="text-[9px] text-neutral-400 font-bold block mt-4">
-                      {selectedItem.sources ? `${selectedItem.sources.length}개 교차 검증 소스` : "실시간 웹 검색 활용"}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Server-side warning (e.g. DB 저장 실패) */}
-                {selectedItem.warning && (
-                  <div className="bg-warning-50 dark:bg-warning-950/40 border border-warning-500/40 dark:border-warning-500/30 rounded-lg p-3 text-[11px] text-warning-700 dark:text-warning-400 font-semibold">
-                    ⚠️ {selectedItem.warning}
-                  </div>
-                )}
-
-                {/* Verdict explanation card */}
-                <div className="space-y-2">
-                  <h4 className="text-[10px] font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-widest flex items-center gap-1.5">
-                    <Info size={14} className="text-neutral-400" /> 종합 분석 소견
-                  </h4>
-                  <div className="bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-800 rounded-lg p-4 text-xs text-neutral-700 dark:text-neutral-300 leading-relaxed font-semibold">
-                    {selectedItem.reason}
-                  </div>
-                </div>
-
-                {/* Claims Breakdown (진실/거짓 요소별 분류) */}
-                {selectedItem.claims_breakdown && selectedItem.claims_breakdown.length > 0 && (
-                  <div className="space-y-3">
-                    <h4 className="text-[10px] font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-widest flex items-center gap-1.5">
-                      <Layers size={14} className="text-neutral-400" /> 요소별 세부 검증 (진실/거짓 분류)
-                    </h4>
-                    <div className="space-y-2">
-                      {selectedItem.claims_breakdown.map((item, idx) => {
-                        const isTrue = item.truth === "진실";
-                        const isFalse = item.truth === "거짓";
-                        return (
-                          <div
-                            key={idx}
-                            className="bg-neutral-50 dark:bg-neutral-800 border border-neutral-200/60 dark:border-neutral-800 rounded-lg p-3.5 text-xs space-y-1.5 shadow-sm"
-                          >
-                            <div className="flex items-center gap-2">
-                              {isTrue ? (
-                                <span className="flex items-center gap-1 text-[10px] bg-success-50 dark:bg-success-950/40 text-success-700 dark:text-success-400 font-bold border border-success-500/25 px-2 py-0.5 rounded-full shrink-0">
-                                  <Check size={10} /> {item.truth}
-                                </span>
-                              ) : isFalse ? (
-                                <span className="flex items-center gap-1 text-[10px] bg-error-50 dark:bg-error-950/40 text-error-600 dark:text-error-400 font-bold border border-error-500/25 px-2 py-0.5 rounded-full shrink-0">
-                                  <X size={10} /> {item.truth}
-                                </span>
-                              ) : (
-                                <span className="flex items-center gap-1 text-[10px] bg-warning-50 dark:bg-warning-950/40 text-warning-700 dark:text-warning-400 font-bold border border-warning-500/25 px-2 py-0.5 rounded-full shrink-0">
-                                  <AlertCircle size={10} /> {item.truth}
-                                </span>
-                              )}
-                              <h5 className="font-bold text-neutral-950 dark:text-neutral-100 leading-tight flex-1">{item.claim}</h5>
-                            </div>
-                            <p className="text-[11px] text-neutral-500 dark:text-neutral-400 leading-relaxed font-medium pl-1">{item.explanation}</p>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* Q&A Interactive Deep Analysis */}
-                <div className="space-y-3 pt-2 border-t border-neutral-100 dark:border-neutral-800/80">
-                  <h4 className="text-[10px] font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-widest flex items-center gap-1.5">
-                    <HelpCircle size={14} className="text-neutral-400" /> 심층 질문 및 추가 검증
-                  </h4>
-
-                  {/* Chat logs */}
-                  <div className="space-y-2.5 max-h-[220px] overflow-y-auto pr-1">
-                    {chatHistory.length === 0 ? (
-                      <p className="text-[11px] text-neutral-400 italic font-medium pl-1">이 기사에서 더 알고 싶은 사실이 있다면 아래에 질문해 보세요. (예: &quot;진짜 벨기에로 전투기 출격했나?&quot;)</p>
-                    ) : (
-                      chatHistory.map((chat, idx) => (
-                        <div key={idx} className="space-y-1.5">
-                          <div className="flex justify-end">
-                            <span className="bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 px-3 py-1.5 rounded-2xl rounded-tr-none text-xs font-bold shadow-sm max-w-[85%]">
-                              {chat.query}
-                            </span>
-                          </div>
-                          <div className="flex justify-start">
-                            <div className="bg-info-50/60 dark:bg-info-950/30 border border-info-500/20 dark:border-info-500/20 text-neutral-800 dark:text-neutral-200 px-3 py-2 rounded-2xl rounded-tl-none text-xs font-semibold shadow-sm max-w-[85%] leading-relaxed">
-                              {chat.loading ? (
-                                <span className="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400 font-bold">
-                                  <Loader2 size={12} className="animate-spin" /> 실시간 보도 검색 및 AI 분석 중...
-                                </span>
-                              ) : (
-                                chat.answer
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-
-                  {/* Chat input */}
-                  <form onSubmit={handleChatSubmit} className="flex gap-2">
-                    <input
-                      type="text"
-                      value={chatInput}
-                      onChange={(e) => setChatInput(e.target.value)}
-                      placeholder="추가 질문을 입력해 주세요..."
-                      disabled={loadingChat}
-                      className="flex-1 bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-800 rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 dark:focus:ring-brand-400/30 dark:focus:border-brand-400 text-neutral-900 dark:text-neutral-100"
-                    />
-                    <button
-                      type="submit"
-                      disabled={loadingChat || !chatInput.trim()}
-                      className="bg-brand-500 hover:bg-brand-600 active:bg-brand-700 text-white rounded-md p-2 shrink-0 disabled:opacity-40 flex items-center justify-center transition-colors"
-                    >
-                      <Send size={14} />
-                    </button>
-                  </form>
-                </div>
-
-                {/* Emoji Reactions */}
-                <div className="space-y-3 pt-2 border-t border-neutral-100 dark:border-neutral-800/80">
-                  <h4 className="text-[10px] font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-widest">
-                    리액션 남기기
-                  </h4>
-                  <div className="flex gap-2.5">
-                    {["👍", "👎", "😮", "😡"].map(emoji => {
-                      const reaction = reactions.find(r => r.emoji === emoji);
-                      const isReacted = !!userReactions[emoji];
-                      return (
-                        <button
-                          key={emoji}
-                          onClick={() => handleAddReaction(emoji)}
-                          className={`flex items-center gap-1.5 border rounded-md px-3.5 py-1.5 text-xs font-bold transition-all shadow-sm active:scale-95 ${
-                            isReacted
-                              ? "bg-brand-50 dark:bg-brand-900/40 border-brand-500/50 dark:border-brand-400/40 text-brand-600 dark:text-brand-300"
-                              : "bg-neutral-50 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-700"
+                      <div className="flex items-center justify-between gap-2">
+                        <span
+                          className={`text-[11px] font-bold tracking-[0.06em] ${
+                            isActive ? "text-neutral-900" : isCompleted ? "text-success-700" : "text-neutral-400"
                           }`}
                         >
-                          <span>{emoji}</span>
-                          <span className={`font-mono text-[10px] ${isReacted ? "text-brand-500 dark:text-brand-300" : "text-neutral-400"}`}>
-                            {reaction ? reaction.count : 0}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                          {step.label}
+                        </span>
+                        {isCompleted && <CheckCircle size={12} className="text-success-600 shrink-0" />}
+                        {isActive && <Loader2 size={12} className="animate-spin text-neutral-900 shrink-0" />}
+                      </div>
+                      <p className="mt-1 text-[11px] leading-[1.5] text-neutral-500">{step.desc}</p>
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+          )}
+        </section>
 
-                {/* Community Comments */}
-                <div className="space-y-3 pt-2 border-t border-neutral-100 dark:border-neutral-800/80">
-                  <h4 className="text-[10px] font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-widest flex items-center gap-1.5">
-                    <MessageSquare size={14} className="text-neutral-400" /> 댓글 모음 ({comments.length}건)
-                  </h4>
-
-                  {/* Comments list */}
-                  <div className="space-y-2 max-h-[200px] overflow-y-auto pr-1">
-                    {comments.length === 0 ? (
-                      <p className="text-[11px] text-neutral-400 italic pl-1">첫 댓글을 작성해 보세요!</p>
-                    ) : (
-                      comments.map((comment, index) => (
-                        <div
-                          key={index}
-                          className="bg-neutral-50 dark:bg-neutral-800 border border-neutral-200/60 dark:border-neutral-800 rounded-lg p-3 text-xs space-y-1"
-                        >
-                          <div className="flex justify-between items-center text-[10px] font-bold text-neutral-400">
-                            <span>👤 {comment.author}</span>
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono font-medium text-[9px]">{new Date(comment.created_at).toLocaleDateString()}</span>
-                              {(comment.user_token === userToken || !comment.user_token) && (
-                                <button
-                                  onClick={() => handleDeleteComment(comment.id)}
-                                  className="text-neutral-400 hover:text-error-500 p-0.5 rounded transition-colors"
-                                  title="댓글 삭제"
-                                >
-                                  <X size={12} />
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                          <p className="text-neutral-700 dark:text-neutral-300 leading-normal pl-0.5">{comment.content}</p>
-                        </div>
-                      ))
-                    )}
-                  </div>
-
-                  {/* Comment inputs */}
-                  <form onSubmit={handleAddComment} className="space-y-2">
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={commentAuthor}
-                        onChange={(e) => setCommentAuthor(e.target.value)}
-                        placeholder="이름 (익명)"
-                        maxLength="15"
-                        className="w-1/3 bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-800 rounded-md px-2.5 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 dark:focus:ring-brand-400/30 dark:focus:border-brand-400 text-neutral-900 dark:text-neutral-100"
-                      />
-                      <input
-                        type="text"
-                        value={commentContent}
-                        onChange={(e) => setCommentContent(e.target.value)}
-                        placeholder="공동 팩트체크를 위한 댓글을 적어주세요..."
-                        required
-                        className="flex-1 bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-800 rounded-md px-2.5 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 dark:focus:ring-brand-400/30 dark:focus:border-brand-400 text-neutral-900 dark:text-neutral-100"
-                      />
-                    </div>
-                    <button
-                      type="submit"
-                      disabled={!commentContent.trim()}
-                      className="w-full bg-brand-500 hover:bg-brand-600 active:bg-brand-700 text-white font-bold text-xs py-2 rounded-md transition-all shadow-sm disabled:opacity-40"
-                    >
-                      댓글 등록
-                    </button>
-                  </form>
-                </div>
-
-                {/* Search references list */}
-                {selectedItem.sources && selectedItem.sources.length > 0 && (
-                  <div className="space-y-3">
-                    <h4 className="text-[10px] font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-widest">
-                      📡 실시간 웹 교차 수집 출처 ({selectedItem.sources?.length || 0}건)
-                    </h4>
-                    <div className="space-y-2.5 max-h-[320px] overflow-y-auto pr-1">
-                      {selectedItem.sources && selectedItem.sources.length > 0 ? (
-                        selectedItem.sources.map((src, index) => (
-                          <div 
-                            key={index}
-                            className="bg-neutral-50 dark:bg-neutral-800 border border-neutral-200/60 dark:border-neutral-800 rounded-lg p-3.5 text-xs space-y-1.5 hover:border-neutral-300 dark:hover:border-neutral-700 transition-colors shadow-sm"
-                          >
-                            <div className="flex justify-between items-start gap-2">
-                              <h5 className="font-bold text-neutral-950 dark:text-neutral-100 line-clamp-1 flex-1 leading-tight">{src.title}</h5>
-                              <a 
-                                href={src.link} 
-                                target="_blank" 
-                                rel="noreferrer"
-                                className="text-brand-500 hover:text-brand-600 dark:text-brand-300 dark:hover:text-brand-200 shrink-0"
-                              >
-                                <ExternalLink size={12} />
-                              </a>
-                            </div>
-                            <p className="text-[11px] text-neutral-400 leading-relaxed line-clamp-2">{src.description}</p>
-                            <div className="text-[9px] text-neutral-400/80 font-mono text-right">{src.pub_date}</div>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="text-xs text-neutral-400 text-center py-6 border border-dashed border-neutral-200 dark:border-neutral-800 rounded-lg">
-                          실시간 수집된 관련 교차 출처가 존재하지 않습니다.
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-              </div>
-
-              {/* Panel Delete Actions */}
-              <div className="border-t border-neutral-200 dark:border-neutral-800/80 pt-4 mt-6 flex gap-2">
-                <button 
-                  onClick={(e) => handleDelete(selectedItem.id, e)}
-                  className="flex-1 border border-error-500/25 dark:border-error-500/25 hover:bg-error-50 dark:hover:bg-error-950/20 text-error-600 dark:text-error-400 py-2.5 rounded-lg font-bold text-xs transition-colors flex items-center justify-center gap-1.5"
+        {/* §B 검증 결과 — 전체폭, 최상단 */}
+        {selectedItem && (
+          <section
+            ref={resultRef}
+            tabIndex={-1}
+            aria-live="polite"
+            className={`mt-10 scroll-mt-20 border-t-4 ${tone.rule} pt-5 focus:outline-none`}
+          >
+            <div className="flex items-baseline justify-between gap-4">
+              <p className={subKicker}>정밀 진단 레포트</p>
+              <div className="flex items-baseline gap-3 text-[10px] tabular-nums text-neutral-400">
+                {selectedItem.id != null && <span>NO.{selectedItem.id}</span>}
+                {selectedItem.created_at && <span>{new Date(selectedItem.created_at).toLocaleString()}</span>}
+                {selectedItem.cached && <span className="uppercase tracking-[0.14em]">캐시</span>}
+                <button
+                  onClick={() => setSelectedItem(null)}
+                  aria-label="레포트 닫기"
+                  className="text-neutral-300 hover:text-neutral-900 transition-colors"
                 >
-                  <Trash2 size={14} /> 레포트 삭제
+                  <X size={14} />
                 </button>
               </div>
-
             </div>
-          )}
-            </>
-          ) : (
-            /* AI Chatbot Assistant Tab Content */
-            <div className="flex-1 flex flex-col h-full p-6 space-y-4 max-w-full overflow-hidden">
-              <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800/80 rounded-2xl p-6 shadow-sm flex flex-col h-[calc(100vh-140px)] relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-brand-500 via-brand-400 to-secondary-500"></div>
-                
-                {/* Chat Panel Header */}
-                <div className="border-b border-neutral-100 dark:border-neutral-800 pb-4 mb-4 flex justify-between items-center shrink-0">
-                  <div>
-                    <h2 className="text-lg font-bold tracking-tight text-neutral-950 dark:text-neutral-50 flex items-center gap-2">
-                      <MessageSquare className="text-brand-500" size={20} />
-                      AI 팩트체크 어시스턴트
-                    </h2>
-                    <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">자유롭게 소문이나 루머를 질문하세요. 실시간 웹 보도를 수집하여 팩트를 분석해 드립니다.</p>
-                  </div>
-                  <button 
-                    onClick={() => setGeneralChatHistory([
-                      {
-                        query: null,
-                        answer: "안녕하세요! 실시간 웹 검색과 RAG-LLM 기반의 AI 팩트체커 어시스턴트입니다. 궁금한 소문, 뉴스, 루머에 대해 질문하시면 실시간으로 관련 사실을 추적하고 검증 결과를 알려드립니다. (예: '성수대교 단차 9cm 사실인가요?')",
-                        sources: [],
-                        isSystem: true
-                      }
-                    ])}
-                    className="text-xs text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 flex items-center gap-1 border border-neutral-200 dark:border-neutral-800 rounded-lg px-2.5 py-1"
-                  >
-                    대화 초기화
-                  </button>
-                </div>
 
-                {/* Chat Message Logs Area */}
-                <div className="flex-1 overflow-y-auto space-y-4 pr-1 mb-4">
-                  {generalChatHistory.map((chat, idx) => (
-                    <div key={idx} className="space-y-2">
-                      {/* User Query */}
-                      {chat.query && (
-                        <div className="flex justify-end">
-                          <div className="bg-brand-500 text-white px-4 py-2.5 rounded-2xl rounded-tr-none text-sm font-bold shadow-sm max-w-[75%]">
-                            {chat.query}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* AI Answer */}
-                      <div className="flex justify-start">
-                        <div className="bg-neutral-50 dark:bg-neutral-850 border border-neutral-200/50 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 px-4 py-3 rounded-2xl rounded-tl-none text-sm font-medium shadow-sm max-w-[85%] space-y-3 leading-relaxed">
-                          {chat.loading ? (
-                            <span className="flex items-center gap-2 text-neutral-500 dark:text-neutral-400 font-bold py-1">
-                              <Loader2 size={16} className="animate-spin" /> 실시간 보도 검색 및 RAG AI 분석 진행 중...
-                            </span>
-                          ) : (
-                            <>
-                              <div className="whitespace-pre-wrap text-neutral-800 dark:text-neutral-200">
-                                {chat.answer}
-                              </div>
-
-                              {/* Search Sources for this reply */}
-                              {chat.sources && chat.sources.length > 0 && (
-                                <div className="pt-3 border-t border-neutral-200/50 dark:border-neutral-800 space-y-2">
-                                  <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest flex items-center gap-1">
-                                    <Globe size={11} /> 교차 검증 참고 출처 ({chat.sources.length}건)
-                                  </p>
-                                  <div className="flex flex-wrap gap-2">
-                                    {chat.sources.map((src, sIdx) => (
-                                      <a
-                                        key={sIdx}
-                                        href={src.link}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="text-[10px] bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700/60 rounded-lg px-2.5 py-1 text-neutral-600 dark:text-neutral-300 hover:text-brand-500 dark:hover:text-brand-400 font-bold truncate max-w-[200px]"
-                                        title={src.description}
-                                      >
-                                        {src.title}
-                                      </a>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Suggestions Cards */}
-                {generalChatHistory.length === 1 && (
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mb-4 shrink-0">
-                    {[
-                      "성수대교 진입로 9cm 단차 발생 사실인가요?",
-                      "박세리 아버지가 재단 인장 위조로 고소당한 일 진짜인가요?",
-                      "벨기에 전투기 우크라이나 지원 출격 여부 팩트체크"
-                    ].map((sug, sIdx) => (
-                      <button
-                        key={sIdx}
-                        onClick={(e) => handleGeneralChatSubmit(e, sug)}
-                        className="text-left text-xs bg-neutral-50/50 dark:bg-neutral-900/30 border border-neutral-200 dark:border-neutral-800/80 hover:border-brand-500/60 dark:hover:border-brand-400/40 rounded-xl p-3.5 text-neutral-600 dark:text-neutral-400 hover:text-brand-600 dark:hover:text-brand-300 transition-all font-semibold active:scale-[0.98]"
-                      >
-                        {sug}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {/* Chat Input form */}
-                <form onSubmit={handleGeneralChatSubmit} className="flex gap-2 shrink-0">
-                  <input
-                    type="text"
-                    value={generalChatInput}
-                    onChange={(e) => setGeneralChatInput(e.target.value)}
-                    placeholder="소문이나 검증이 필요한 질문을 입력해 주세요..."
-                    disabled={loadingGeneralChat}
-                    className="flex-1 bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 text-neutral-950 dark:text-neutral-100"
-                  />
-                  <button
-                    type="submit"
-                    disabled={loadingGeneralChat || !generalChatInput.trim()}
-                    className="bg-brand-500 hover:bg-brand-600 active:bg-brand-700 text-white rounded-xl px-5 py-3 font-bold transition-all shadow-sm disabled:opacity-40 flex items-center justify-center gap-1.5"
-                  >
-                    <Send size={16} />
-                    <span>질문 전송</span>
-                  </button>
-                </form>
+            {/* 판정어 + 모순율 */}
+            <div className="mt-3 flex flex-wrap items-end justify-between gap-x-8 gap-y-3">
+              <h2 className={`text-[44px] md:text-[64px] font-black leading-[0.9] tracking-[-0.04em] ${tone.text}`}>
+                {tone.label}
+              </h2>
+              <div className="text-right">
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-neutral-500">주장 모순율</p>
+                <p className={`mt-1 text-[34px] md:text-[44px] font-black tabular-nums leading-none ${tone.text}`}>
+                  {(score * 100).toFixed(0)}
+                  <span className="text-[18px] md:text-[22px] align-top">%</span>
+                </p>
               </div>
             </div>
-          )}
 
-        </div>
+            <div className="mt-4 h-[3px] w-full bg-neutral-200">
+              <div className={`h-full ${tone.bar} transition-all duration-500`} style={{ width: `${score * 100}%` }} />
+            </div>
 
-      </div>
+            <h3 className="mt-7 text-[22px] md:text-[30px] font-bold leading-[1.3] tracking-[-0.02em] max-w-[34ch]">
+              {selectedItem.title}
+            </h3>
 
+            <p className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-neutral-500">
+              <a href={selectedItem.url} target="_blank" rel="noreferrer" className={editorialLink}>
+                원문 보기 <ExternalLink size={10} className="inline align-baseline" />
+              </a>
+              <span aria-hidden>·</span>
+              <span>실시간 RAG 기사 대조</span>
+              <span aria-hidden>·</span>
+              <span className="tabular-nums">교차 출처 {sources.length}건</span>
+            </p>
+
+            {selectedItem.warning && (
+              <p className="mt-6 border-l-2 border-warning-500 pl-5 text-[13px] leading-[1.7] text-warning-700 max-w-[68ch]">
+                {selectedItem.warning}
+              </p>
+            )}
+
+            {/* 리드 = 종합 소견 */}
+            <p
+              className={`mt-6 border-l-2 ${tone.rule} pl-5 text-[15px] md:text-base leading-[1.85] text-neutral-800 max-w-[68ch]`}
+            >
+              {selectedItem.reason}
+            </p>
+
+            {/* 요소별 세부 검증 */}
+            {Array.isArray(selectedItem.claims_breakdown) && selectedItem.claims_breakdown.length > 0 && (
+              <div className="mt-12 border-t border-neutral-200 pt-3">
+                <h4 className={subKicker}>요소별 세부 검증</h4>
+                <ol className="mt-2 divide-y divide-neutral-200">
+                  {selectedItem.claims_breakdown.map((c, idx) => (
+                    <li
+                      key={idx}
+                      className="grid grid-cols-[3.5rem_1fr] md:grid-cols-[5rem_1fr] gap-x-4 md:gap-x-6 py-5"
+                    >
+                      <span className={`pt-1 text-[10px] font-bold uppercase tracking-[0.14em] ${truthTone(c.truth)}`}>
+                        {c.truth}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-[15px] font-bold leading-[1.5] text-neutral-900">{c.claim}</p>
+                        <p className="mt-1.5 text-sm leading-[1.75] text-neutral-600 max-w-[68ch]">{c.explanation}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
+
+            {/* 교차 검증 출처 */}
+            {sources.length > 0 && (
+              <div className="mt-12 border-t border-neutral-200 pt-3">
+                <h4 className={subKicker}>교차 검증 출처</h4>
+                <ol className="mt-2 divide-y divide-neutral-200">
+                  {sources.map((src, i) => (
+                    <li key={i} className="grid grid-cols-[1.75rem_1fr] gap-x-3 py-4">
+                      <span className="text-[11px] font-black tabular-nums text-neutral-300 pt-0.5">
+                        {String(i + 1).padStart(2, "0")}
+                      </span>
+                      <div className="min-w-0">
+                        <a
+                          href={src.link}
+                          target="_blank"
+                          rel="noreferrer"
+                          className={`text-[14px] font-bold leading-snug ${editorialLink}`}
+                        >
+                          {src.title}
+                          <ExternalLink size={10} className="inline ml-1 align-baseline text-neutral-400" />
+                        </a>
+                        <p className="mt-1 text-[12px] leading-[1.6] text-neutral-500 line-clamp-2">{src.description}</p>
+                        <p className="mt-1 text-[10px] tabular-nums text-neutral-400">
+                          {src.pubDate ?? src.pub_date ?? ""}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
+
+            {/* 공동 팩트체크 (댓글) */}
+            <div className="mt-12 border-t border-neutral-200 pt-3">
+              <h4 className={subKicker}>
+                공동 팩트체크 <span className="tabular-nums">({comments.length})</span>
+              </h4>
+
+              {comments.length === 0 ? (
+                <p className="mt-3 text-[12px] text-neutral-400">첫 의견을 남겨 보세요.</p>
+              ) : (
+                <ul className="mt-2 divide-y divide-neutral-200">
+                  {comments.map((c, index) => (
+                    <li key={c.id ?? index} className="py-4">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-neutral-900">
+                          {c.author}
+                        </span>
+                        <span className="flex items-baseline gap-2 text-[10px] tabular-nums text-neutral-400">
+                          {c.created_at && new Date(c.created_at).toLocaleDateString()}
+                          {(c.user_token === userToken || !c.user_token) && (
+                            <button
+                              onClick={() => handleDeleteComment(c.id)}
+                              title="댓글 삭제"
+                              className="text-neutral-300 hover:text-error-600 transition-colors"
+                            >
+                              <X size={11} />
+                            </button>
+                          )}
+                        </span>
+                      </div>
+                      <p className="mt-1.5 text-sm leading-[1.7] text-neutral-700 max-w-[68ch]">{c.content}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <form onSubmit={handleAddComment} className="mt-5 flex flex-wrap items-end gap-3">
+                <input
+                  type="text"
+                  value={commentAuthor}
+                  onChange={(e) => setCommentAuthor(e.target.value)}
+                  placeholder="이름"
+                  maxLength="15"
+                  className={`w-28 shrink-0 ${smallInput}`}
+                />
+                <input
+                  type="text"
+                  value={commentContent}
+                  onChange={(e) => setCommentContent(e.target.value)}
+                  placeholder="공동 팩트체크 의견을 남겨 주세요"
+                  required
+                  className={`flex-1 min-w-[12rem] ${smallInput}`}
+                />
+                <button
+                  type="submit"
+                  disabled={!commentContent.trim()}
+                  className="shrink-0 bg-neutral-900 text-white px-5 py-2 text-[11px] font-bold uppercase tracking-[0.14em] hover:bg-brand-500 active:bg-brand-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  등록
+                </button>
+              </form>
+            </div>
+
+            {/* 레포트 푸터 */}
+            <div className="mt-12 border-t border-neutral-200 pt-4 flex items-center justify-between">
+              <button
+                onClick={() => setSelectedItem(null)}
+                className="text-[11px] font-bold uppercase tracking-[0.12em] text-neutral-400 hover:text-neutral-900 underline underline-offset-4 decoration-neutral-200 transition-colors"
+              >
+                닫기
+              </button>
+              {selectedItem.id != null && (
+                <button
+                  onClick={(e) => handleDelete(selectedItem.id, e)}
+                  className="text-[11px] font-bold uppercase tracking-[0.12em] text-neutral-400 hover:text-error-600 underline underline-offset-4 decoration-neutral-200 hover:decoration-error-600 transition-colors"
+                >
+                  <Trash2 size={12} className="inline mr-1.5 align-[-1px]" />
+                  레포트 삭제
+                </button>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* §C 실시간 탐지 현황 */}
+        <section className="mt-14 border-t border-neutral-900 pt-4">
+          <h2 className={`${kicker} text-neutral-900`}>실시간 탐지 현황</h2>
+
+          <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 divide-x divide-neutral-200">
+            <div className="pr-5 sm:px-5 sm:first:pl-0">
+              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-neutral-500">총 검사</p>
+              <p className="mt-1.5 text-[28px] md:text-[36px] font-black tabular-nums leading-none text-neutral-900">
+                {stats.total_checks}
+              </p>
+            </div>
+            <div className="pl-5 sm:px-5">
+              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-neutral-500">진짜</p>
+              <p className="mt-1.5 text-[28px] md:text-[36px] font-black tabular-nums leading-none text-success-700">
+                {stats.real_count}
+              </p>
+            </div>
+            <div className="pr-5 sm:px-5 mt-6 sm:mt-0">
+              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-neutral-500">가짜</p>
+              <p className="mt-1.5 text-[28px] md:text-[36px] font-black tabular-nums leading-none text-error-700">
+                {stats.fake_count}
+              </p>
+            </div>
+            <div className="pl-5 sm:px-5 mt-6 sm:mt-0">
+              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-neutral-500">의심</p>
+              <p className="mt-1.5 text-[28px] md:text-[36px] font-black tabular-nums leading-none text-warning-700">
+                {stats.suspicious_count}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-5 flex h-[3px] w-full bg-neutral-200">
+            <div className="bg-success-500" style={{ width: `${pct(stats.real_count)}%` }} />
+            <div className="bg-error-500" style={{ width: `${pct(stats.fake_count)}%` }} />
+            <div className="bg-warning-500" style={{ width: `${pct(stats.suspicious_count)}%` }} />
+          </div>
+
+          <p className="mt-2.5 text-[11px] text-neutral-500">
+            평균 모순 점수{" "}
+            <span className="tabular-nums font-bold text-neutral-900">
+              {(Number(stats.avg_contradiction_score) || 0).toFixed(2)}
+            </span>
+          </p>
+        </section>
+
+        {/* §D 실시간 랭킹 */}
+        <section className="mt-14 border-t border-neutral-900 pt-4">
+          <h2 className={`${kicker} text-neutral-900`}>실시간 랭킹</h2>
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-10">
+            <div>
+              <h3 className={`${kicker} text-neutral-500`}>가장 많이 검증된 기사</h3>
+              {rankings.most_checked.length === 0 ? (
+                <p className="mt-3 text-[11px] text-neutral-400">검증 통계가 없습니다.</p>
+              ) : (
+                <ol className="mt-3 border-t border-neutral-200 divide-y divide-neutral-200">
+                  {rankings.most_checked.map((item, idx) => (
+                    <li
+                      key={idx}
+                      onClick={() => {
+                        const matched = history.find((h) => h.url === item.url);
+                        if (matched) setSelectedItem(matched);
+                      }}
+                      className="group flex items-baseline gap-4 py-3 cursor-pointer"
+                    >
+                      <span className="w-4 shrink-0 text-[12px] font-black tabular-nums text-neutral-300">
+                        {idx + 1}
+                      </span>
+                      <span className="flex-1 min-w-0 truncate text-[13px] text-neutral-900 group-hover:underline underline-offset-[3px]">
+                        {item.title}
+                      </span>
+                      <span className="shrink-0 text-[11px] tabular-nums text-neutral-500">{item.count}회</span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+
+            <div>
+              <h3 className={`${kicker} text-neutral-500`}>모순율이 가장 높은 기사</h3>
+              {rankings.top_fakes.length === 0 ? (
+                <p className="mt-3 text-[11px] text-neutral-400">검출된 거짓 기사가 없습니다.</p>
+              ) : (
+                <ol className="mt-3 border-t border-neutral-200 divide-y divide-neutral-200">
+                  {rankings.top_fakes.map((item, idx) => {
+                    const t = verdictTone(item.verdict);
+                    return (
+                      <li
+                        key={idx}
+                        onClick={() => {
+                          const matched = history.find((h) => h.url === item.url);
+                          if (matched) setSelectedItem(matched);
+                        }}
+                        className="group flex items-baseline gap-4 py-3 cursor-pointer"
+                      >
+                        <span className="w-4 shrink-0 text-[12px] font-black tabular-nums text-neutral-300">
+                          {idx + 1}
+                        </span>
+                        <span className="flex-1 min-w-0 truncate text-[13px] text-neutral-900 group-hover:underline underline-offset-[3px]">
+                          {item.title}
+                        </span>
+                        <span className={`shrink-0 text-[11px] tabular-nums font-bold ${t.text}`}>
+                          {((Number(item.contradiction_score) || 0) * 100).toFixed(0)}%
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* §E 검증 히스토리 */}
+        <section className="mt-14 border-t border-neutral-900 pt-4">
+          <div className="flex items-baseline justify-between gap-4">
+            <h2 className={`${kicker} text-neutral-900`}>검증 히스토리</h2>
+            <span className="text-[11px] tabular-nums text-neutral-500">{history.length}건</span>
+          </div>
+
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-y border-neutral-900">
+                  <th className="py-2 pr-4 text-[10px] font-bold uppercase tracking-[0.16em] text-neutral-500">판정</th>
+                  <th className="py-2 pr-4 text-[10px] font-bold uppercase tracking-[0.16em] text-neutral-500">기사</th>
+                  <th className="py-2 pr-4 text-[10px] font-bold uppercase tracking-[0.16em] text-neutral-500 text-right">
+                    모순
+                  </th>
+                  <th className="py-2 w-8" />
+                </tr>
+              </thead>
+              <tbody>
+                {history.length === 0 ? (
+                  <tr>
+                    <td colSpan="4" className="py-16 text-center text-[13px] text-neutral-400">
+                      검증 기록이 없습니다. 위에 링크를 입력해 첫 기사를 검증해 보세요.
+                    </td>
+                  </tr>
+                ) : (
+                  history.map((item) => {
+                    const isSelected = selectedItem?.id === item.id;
+                    const t = verdictTone(item.verdict);
+                    const s = Number(item.contradiction_score) || 0;
+                    return (
+                      <tr
+                        key={item.id}
+                        onClick={() => setSelectedItem(item)}
+                        className={`border-b border-neutral-200 cursor-pointer hover:bg-neutral-50 transition-colors ${
+                          isSelected ? "bg-neutral-50" : ""
+                        }`}
+                      >
+                        <td
+                          className={`py-4 pr-4 align-top ${
+                            isSelected ? "border-l-2 border-neutral-900 pl-3" : ""
+                          }`}
+                        >
+                          <span
+                            className={`inline-flex items-center gap-2 text-[11px] font-bold tracking-[0.12em] ${t.text}`}
+                          >
+                            <span className={`h-[3px] w-4 shrink-0 ${t.bar}`} />
+                            {t.short}
+                          </span>
+                        </td>
+                        <td className="py-4 pr-4 align-top max-w-0 w-full">
+                          <span className="block truncate text-[14px] font-bold leading-snug text-neutral-900">
+                            {item.title}
+                          </span>
+                          <span className="mt-0.5 block truncate text-[11px] text-neutral-400">
+                            {item.url}
+                            {item.created_at ? ` · ${new Date(item.created_at).toLocaleDateString()}` : ""}
+                          </span>
+                        </td>
+                        <td
+                          className={`py-4 pr-4 align-top text-right tabular-nums text-[13px] font-bold ${
+                            s > 0.6 ? "text-error-700" : s > 0.2 ? "text-warning-700" : "text-success-700"
+                          }`}
+                        >
+                          {s.toFixed(2)}
+                        </td>
+                        <td className="py-4 align-top text-right">
+                          <button
+                            onClick={(e) => handleDelete(item.id, e)}
+                            title="삭제"
+                            className="p-1 text-neutral-300 hover:text-error-600 transition-colors"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <footer className="mt-20 border-t border-neutral-200 pt-4 flex items-baseline justify-between text-[10px] uppercase tracking-[0.16em] text-neutral-400">
+          <span>Fake News Defender</span>
+          <span>Powered by Gemini 2.5</span>
+        </footer>
+      </main>
     </div>
   );
 }
