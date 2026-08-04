@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import Landing from "./Landing";
-import { Trash2, ExternalLink, CheckCircle, Loader2, X } from "lucide-react";
+import { Trash2, ExternalLink, CheckCircle, Loader2, X, House } from "lucide-react";
 import { verdictTone, truthTone } from "./verdict";
 
 const API_BASE_URL = "/api";
@@ -301,6 +301,9 @@ export default function App() {
   const score = selectedItem ? Number(selectedItem.contradiction_score ?? 0) : 0;
   const sources = selectedItem?.sources ?? [];
 
+  // 마스트헤드 헤드라인 = 가장 많이 검증된 기사 1건
+  const headline = rankings.most_checked?.[0] ?? null;
+
   // 공통 클래스
   const kicker = "text-[11px] font-bold uppercase tracking-[0.18em]";
   const subKicker = `${kicker} text-neutral-500`;
@@ -313,18 +316,45 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-neutral-0 text-neutral-900 font-sans">
-      {/* 마스트헤드 */}
+      {/* 마스트헤드 — 홈 + 헤드라인(가장 많이 검증된 기사) */}
       <header className="sticky top-0 z-30 bg-neutral-0 border-b border-neutral-900">
-        <div className="mx-auto w-full max-w-[1100px] px-6 md:px-10 h-14 flex items-center justify-between gap-4">
+        <div className="mx-auto w-full max-w-[1100px] px-6 md:px-10 h-14 flex items-center gap-4 md:gap-8">
+          {/* 홈 — 데스크톱은 워드마크, 모바일은 아이콘(헤드라인 자리를 내준다) */}
           <button
             type="button"
             onClick={() => setView("landing")}
             title="메인 페이지로 이동"
-            className="text-[17px] font-black uppercase tracking-[-0.01em] text-brand-500 hover:text-neutral-900 transition-colors"
+            aria-label="메인 페이지로 이동"
+            className="shrink-0 flex items-center text-brand-500 hover:text-neutral-900 transition-colors"
           >
-            Fake News Defender
+            <span className="hidden md:inline text-[17px] font-black uppercase tracking-[-0.01em]">
+              Fake News Defender
+            </span>
+            <span className="md:hidden inline-flex items-center justify-center w-9 h-9 -ml-2 border border-neutral-900">
+              <House size={16} strokeWidth={1.75} />
+            </span>
           </button>
-          <span className={`hidden sm:block ${kicker} text-neutral-400`}>Hybrid Fact-Checker</span>
+
+          {/* 헤드라인 — 가장 많이 검증된 기사 */}
+          {headline ? (
+            <button
+              type="button"
+              onClick={() => {
+                const matched = history.find((h) => h.url === headline.url);
+                if (matched) setSelectedItem(matched);
+              }}
+              title={headline.title}
+              className="flex-1 min-w-0 group text-center"
+            >
+              <span className="block truncate text-[12px] md:text-[13px] text-neutral-700 group-hover:text-neutral-900 group-hover:underline underline-offset-[3px] decoration-neutral-300 transition-colors">
+                {headline.title}
+              </span>
+            </button>
+          ) : (
+            <span className="flex-1" />
+          )}
+
+          <span className={`hidden lg:block shrink-0 ${kicker} text-neutral-400`}>Hybrid Fact-Checker</span>
         </div>
       </header>
 
@@ -648,73 +678,6 @@ export default function App() {
           </p>
         </section>
 
-        {/* §D 실시간 랭킹 */}
-        <section className="mt-14 border-t border-neutral-900 pt-4">
-          <h2 className={`${kicker} text-neutral-900`}>실시간 랭킹</h2>
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-10">
-            <div>
-              <h3 className={`${kicker} text-neutral-500`}>가장 많이 검증된 기사</h3>
-              {rankings.most_checked.length === 0 ? (
-                <p className="mt-3 text-[11px] text-neutral-400">검증 통계가 없습니다.</p>
-              ) : (
-                <ol className="mt-3 border-t border-neutral-200 divide-y divide-neutral-200">
-                  {rankings.most_checked.map((item, idx) => (
-                    <li
-                      key={idx}
-                      onClick={() => {
-                        const matched = history.find((h) => h.url === item.url);
-                        if (matched) setSelectedItem(matched);
-                      }}
-                      className="group flex items-baseline gap-4 py-3 cursor-pointer"
-                    >
-                      <span className="w-4 shrink-0 text-[12px] font-black tabular-nums text-neutral-300">
-                        {idx + 1}
-                      </span>
-                      <span className="flex-1 min-w-0 truncate text-[13px] text-neutral-900 group-hover:underline underline-offset-[3px]">
-                        {item.title}
-                      </span>
-                      <span className="shrink-0 text-[11px] tabular-nums text-neutral-500">{item.count}회</span>
-                    </li>
-                  ))}
-                </ol>
-              )}
-            </div>
-
-            <div>
-              <h3 className={`${kicker} text-neutral-500`}>모순율이 가장 높은 기사</h3>
-              {rankings.top_fakes.length === 0 ? (
-                <p className="mt-3 text-[11px] text-neutral-400">검출된 거짓 기사가 없습니다.</p>
-              ) : (
-                <ol className="mt-3 border-t border-neutral-200 divide-y divide-neutral-200">
-                  {rankings.top_fakes.map((item, idx) => {
-                    const t = verdictTone(item.verdict);
-                    return (
-                      <li
-                        key={idx}
-                        onClick={() => {
-                          const matched = history.find((h) => h.url === item.url);
-                          if (matched) setSelectedItem(matched);
-                        }}
-                        className="group flex items-baseline gap-4 py-3 cursor-pointer"
-                      >
-                        <span className="w-4 shrink-0 text-[12px] font-black tabular-nums text-neutral-300">
-                          {idx + 1}
-                        </span>
-                        <span className="flex-1 min-w-0 truncate text-[13px] text-neutral-900 group-hover:underline underline-offset-[3px]">
-                          {item.title}
-                        </span>
-                        <span className={`shrink-0 text-[11px] tabular-nums font-bold ${t.text}`}>
-                          {((Number(item.contradiction_score) || 0) * 100).toFixed(0)}%
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ol>
-              )}
-            </div>
-          </div>
-        </section>
-
         {/* §E 검증 히스토리 */}
         <section className="mt-14 border-t border-neutral-900 pt-4">
           <div className="flex items-baseline justify-between gap-4">
@@ -755,7 +718,7 @@ export default function App() {
                         }`}
                       >
                         <td
-                          className={`py-4 pr-4 align-top ${
+                          className={`py-4 pr-4 align-top whitespace-nowrap ${
                             isSelected ? "border-l-2 border-neutral-900 pl-3" : ""
                           }`}
                         >
