@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 # Import our NLL RAG pipeline and credentials
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from fact_checker_by_url import check_url_validity, GeminiRateLimitError
+from fact_checker_by_url import check_url_validity
 from naver_news_api import SUPABASE_URL, SUPABASE_KEY
 
 # Clean SUPABASE_URL to make sure it doesn't end with /rest/v1 or /rest/v1/ (prevent path doubling)
@@ -86,17 +86,10 @@ def get_supabase_headers():
 class CheckRequest(BaseModel):
     url: str
 
-class QueryRequest(BaseModel):
-    query: str
-
 class CommentRequest(BaseModel):
     author: str
     content: str
     user_token: Optional[str] = None
-
-class ReactionRequest(BaseModel):
-    emoji: str
-    is_canceling: Optional[bool] = False
 
 
 @app.post("/api/preview")
@@ -414,140 +407,6 @@ async def get_rankings():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"랭킹 조회 실패: {str(e)}")
 
-@app.post("/api/check/{check_id}/query")
-async def query_check(check_id: int, payload: QueryRequest):
-    user_query = payload.query.strip()
-    if not user_query:
-        raise HTTPException(status_code=400, detail="질문 내용을 입력해 주세요.")
-        
-    if not SUPABASE_ENABLED:
-        raise HTTPException(status_code=503, detail="Supabase 설정이 되지 않아 기사 정보를 찾을 수 없습니다.")
-        
-    try:
-        headers = get_supabase_headers()
-        url = f"{SUPABASE_URL}/rest/v1/checks?id=eq.{check_id}"
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(url, headers=headers)
-            if resp.status_code != 200 or not resp.json():
-                raise HTTPException(status_code=404, detail="해당 검사 기사를 찾을 수 없습니다.")
-            check_item = resp.json()[0]
-        
-        from fact_checker_by_url import fetch_hybrid_news
-        print(f"[*] 추가 분석 실시간 웹 검색 실행 중: {user_query}")
-        sources = await run_in_threadpool(fetch_hybrid_news, user_query, 5)
-        
-        sources_text = ""
-        for i, s in enumerate(sources):
-            sources_text += f"[참고 자료 {i+1}]\n제목: {s['title']}\n내용 요약: {s['description']}\n링크: {s['link']}\n\n"
-            
-        from datetime import datetime
-        current_date = datetime.now().strftime("%Y년 %m월 %d일")
-        
-        prompt = (
-            f"현재 날짜: {current_date}\n"
-            "당신은 가짜 뉴스를 전문적으로 판정하는 팩트체커 AI입니다.\n"
-            "사용자가 검증 기사 본문에 대해 추가로 질문했습니다. 제공된 [검증 대상 기사]와 [추가 검색된 참고 자료]를 기반으로 사용자의 질문에 상세하고 객관적으로 답변해 주세요.\n\n"
-            "[검증 대상 기사]\n"
-            f"제목: {check_item['title']}\n"
-            f"검증 내용 요약: {check_item['reason']}\n\n"
-            "[사용자의 질문]\n"
-            f"{user_query}\n\n"
-            "[추가 검색된 참고 자료 목록]\n"
-            f"{sources_text if sources_text else '검색된 관련 기사가 없습니다.'}\n"
-            "답변 지침:\n"
-            "1. 질문 내용이 사실(True)인지 거짓(False)인지 혹은 판단이 불가한지 명확히 답하고 근거를 서술해 주세요.\n"
-            "2. 대조군 자료를 바탕으로 신뢰할 수 있게 설명하세요.\n"
-            "3. 한글로 상세하지만 간결하게 3~4문장 정도로 답변을 완성하세요.\n"
-            "4. 반드시 마크다운이나 JSON 기호 없이 일반 평서문 텍스트로만 답변해 주세요."
-        )
-        
-        from fact_checker_by_url import GEMINI_API_KEY, call_gemini_api
-        answer = "LLM 연동이 되어 있지 않아 추가 질문에 대한 분석을 진행할 수 없습니다."
-        
-        if GEMINI_API_KEY and GEMINI_API_KEY.strip() and GEMINI_API_KEY.strip() != "YOUR_GEMINI_API_KEY":
-            try:
-                output = await run_in_threadpool(call_gemini_api, prompt)
-                if output:
-                    answer = output
-                else:
-                    answer = "Gemini API 호출에 실패했습니다. 잠시 후 다시 시도해 주세요."
-            except GeminiRateLimitError:
-                answer = "Gemini API의 일시적 호출량 제한(429 Too Many Requests)을 초과했습니다. 무료 API의 경우 1분당 질문 횟수가 제한될 수 있으니, 약 1분 후 다시 시도해 주세요."
-            except Exception as e:
-                answer = f"Gemini API 호출 중 오류가 발생했습니다: {str(e)}"
-        else:
-            answer = "서버에 GEMINI_API_KEY 환경 변수가 설정되지 않아 실시간 AI 답변 기능을 제공할 수 없습니다."
-            
-        return {
-            "query": user_query,
-            "answer": answer,
-            "sources": sources
-        }
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"추가 분석 실패: {str(e)}")
-
-@app.post("/api/chat")
-async def chat_general(payload: QueryRequest):
-    user_query = payload.query.strip()
-    if not user_query:
-        raise HTTPException(status_code=400, detail="질문 내용을 입력해 주세요.")
-        
-    try:
-        from fact_checker_by_url import fetch_hybrid_news
-        print(f"[*] AI 팩트체커 자유 질문 실시간 웹 검색 실행 중: {user_query}")
-        sources = await run_in_threadpool(fetch_hybrid_news, user_query, 5)
-        
-        sources_text = ""
-        for i, s in enumerate(sources):
-            sources_text += f"[참고 자료 {i+1}]\n제목: {s['title']}\n내용 요약: {s['description']}\n링크: {s['link']}\n\n"
-            
-        from datetime import datetime
-        current_date = datetime.now().strftime("%Y년 %m월 %d일")
-        
-        prompt = (
-            f"현재 날짜: {current_date}\n"
-            "당신은 가짜 뉴스를 전문적으로 판정하는 팩트체커 AI 동반자입니다.\n"
-            "사용자가 특정 기사 링크가 아닌, 자유롭게 팩트체크 질문을 던졌습니다. 제공된 [추가 검색된 참고 자료]를 기반으로 사용자의 질문에 매우 상세하고 친절하며 객관적으로 답변해 주세요.\n\n"
-            "[사용자의 질문]\n"
-            f"{user_query}\n\n"
-            "[추가 검색된 참고 자료 목록]\n"
-            f"{sources_text if sources_text else '검색된 관련 기사가 없습니다.'}\n"
-            "답변 지침:\n"
-            "1. 질문 내용이 언론 보도나 팩트 상 사실(True)인지 거짓(False)인지 혹은 판단유보(Suspicious)인지 두괄식으로 명확히 답해 주세요.\n"
-            "2. 대조군 자료 및 교차 검증된 보도 내용을 바탕으로 논리정연하고 신뢰할 수 있게 설명하세요.\n"
-            "3. 한글로 친절하되 객관적인 어조로 상세히 서술해 주세요.\n"
-            "4. 마크다운 형식(글머리 기호, 굵은 글씨 등)을 활용해 가독성 있게 정리해 주세요."
-        )
-        
-        from fact_checker_by_url import GEMINI_API_KEY, call_gemini_api
-        answer = "LLM 연동이 되어 있지 않아 팩트체크 대화 분석을 진행할 수 없습니다."
-        
-        if GEMINI_API_KEY and GEMINI_API_KEY.strip() and GEMINI_API_KEY.strip() != "YOUR_GEMINI_API_KEY":
-            try:
-                output = await run_in_threadpool(call_gemini_api, prompt)
-                if output:
-                    answer = output
-                else:
-                    answer = "Gemini API 호출에 실패했습니다. 잠시 후 다시 시도해 주세요."
-            except GeminiRateLimitError:
-                answer = "Gemini API의 일시적 호출량 제한(429 Too Many Requests)을 초과했습니다. 무료 API의 경우 1분당 질문 횟수가 제한될 수 있으니, 약 1분 후 다시 시도해 주세요."
-            except Exception as e:
-                answer = f"Gemini API 호출 중 오류가 발생했습니다: {str(e)}"
-        else:
-            answer = "서버에 GEMINI_API_KEY 환경 변수가 설정되지 않아 실시간 AI 답변 기능을 제공할 수 없습니다."
-            
-        return {
-            "query": user_query,
-            "answer": answer,
-            "sources": sources
-        }
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"AI 자유 질문 분석 실패: {str(e)}")
-
 @app.get("/api/history/{check_id}/comments")
 async def get_comments(check_id: int):
     if not SUPABASE_ENABLED:
@@ -619,79 +478,6 @@ async def delete_comment(check_id: int, comment_id: int, user_token: str):
         raise he
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"댓글 삭제 실패: {str(e)}")
-
-@app.get("/api/history/{check_id}/reactions")
-async def get_reactions(check_id: int):
-    if not SUPABASE_ENABLED:
-        return []
-    try:
-        headers = get_supabase_headers()
-        url = f"{SUPABASE_URL}/rest/v1/check_reactions?check_id=eq.{check_id}"
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(url, headers=headers)
-            if resp.status_code != 200:
-                raise Exception(f"Supabase 리액션 조회 실패 (HTTP {resp.status_code}): {resp.text}")
-            return resp.json()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"리액션 조회 실패: {str(e)}")
-
-@app.post("/api/history/{check_id}/reactions")
-async def add_reaction(check_id: int, payload: ReactionRequest):
-    emoji = payload.emoji.strip()
-    is_canceling = payload.is_canceling
-    if not emoji:
-        raise HTTPException(status_code=400, detail="이모지가 없습니다.")
-        
-    if not SUPABASE_ENABLED:
-        raise HTTPException(status_code=503, detail="Supabase 설정이 필요합니다.")
-        
-    try:
-        headers = get_supabase_headers()
-        url = f"{SUPABASE_URL}/rest/v1/check_reactions?check_id=eq.{check_id}&emoji=eq.{emoji}"
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp_get = await client.get(url, headers=headers)
-            
-            if resp_get.status_code == 200 and resp_get.json():
-                existing = resp_get.json()[0]
-                if is_canceling:
-                    new_count = int(existing['count']) - 1
-                    if new_count <= 0:
-                        del_url = f"{SUPABASE_URL}/rest/v1/check_reactions?id=eq.{existing['id']}"
-                        resp_del = await client.delete(del_url, headers=headers)
-                        if resp_del.status_code not in (200, 204):
-                            raise Exception(f"Supabase 리액션 삭제 실패 (HTTP {resp_del.status_code}): {resp_del.text}")
-                        existing['count'] = 0
-                        return existing
-                    else:
-                        update_url = f"{SUPABASE_URL}/rest/v1/check_reactions?id=eq.{existing['id']}"
-                        resp_up = await client.patch(update_url, headers=headers, json={"count": new_count})
-                        if resp_up.status_code not in (200, 204):
-                            raise Exception(f"Supabase 리액션 수정 실패 (HTTP {resp_up.status_code}): {resp_up.text}")
-                        existing['count'] = new_count
-                        return existing
-                else:
-                    new_count = int(existing['count']) + 1
-                    update_url = f"{SUPABASE_URL}/rest/v1/check_reactions?id=eq.{existing['id']}"
-                    resp_up = await client.patch(update_url, headers=headers, json={"count": new_count})
-                    if resp_up.status_code not in (200, 204):
-                        raise Exception(f"Supabase 리액션 수정 실패 (HTTP {resp_up.status_code}): {resp_up.text}")
-                    existing['count'] = new_count
-                    return existing
-            else:
-                if is_canceling:
-                    return {"check_id": check_id, "emoji": emoji, "count": 0}
-                    
-                reaction_data = {
-                    "check_id": check_id,
-                    "emoji": emoji,
-                    "count": 1
-                }
-                resp_in = await client.post(f"{SUPABASE_URL}/rest/v1/check_reactions", headers=headers, json=reaction_data)
-                if resp_in.status_code != 201:
-                    raise Exception(f"Supabase 리액션 저장 실패 (HTTP {resp_in.status_code}): {resp_in.text}")
-                return resp_in.json()[0]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"리액션 저장 실패: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
