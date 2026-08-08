@@ -119,6 +119,21 @@ export default function App() {
     return () => cancelAnimationFrame(raf);
   }, [selectedItem?.id, selectedItem?.url, view]);
 
+  // 마스트헤드 헤드라인 티커 — 가장 많이 검증된 기사 Top 5를 하나씩 올린다
+  const [headlineIdx, setHeadlineIdx] = useState(0);
+  const [headlinePaused, setHeadlinePaused] = useState(false);
+  const headlineCount = rankings.most_checked?.length ?? 0;
+
+  useEffect(() => {
+    if (headlineCount < 2) return;
+    const id = setInterval(() => {
+      if (!headlinePaused && !document.hidden) {
+        setHeadlineIdx((i) => (i + 1) % headlineCount);
+      }
+    }, 4000);
+    return () => clearInterval(id);
+  }, [headlineCount, headlinePaused]);
+
   // Cleanup all active timers on unmount
   useEffect(() => {
     return () => {
@@ -301,8 +316,10 @@ export default function App() {
   const score = selectedItem ? Number(selectedItem.contradiction_score ?? 0) : 0;
   const sources = selectedItem?.sources ?? [];
 
-  // 마스트헤드 헤드라인 = 가장 많이 검증된 기사 1건
-  const headline = rankings.most_checked?.[0] ?? null;
+  // 마스트헤드 헤드라인 = 가장 많이 검증된 기사 Top 5를 순환
+  const headlines = rankings.most_checked ?? [];
+  const headlineAt = headlines.length ? headlineIdx % headlines.length : 0;
+  const headline = headlines[headlineAt] ?? null;
 
   // 공통 클래스
   const kicker = "text-[11px] font-bold uppercase tracking-[0.18em]";
@@ -335,7 +352,7 @@ export default function App() {
             </span>
           </button>
 
-          {/* 헤드라인 — 가장 많이 검증된 기사 */}
+          {/* 헤드라인 — 가장 많이 검증된 기사 Top 5가 하나씩 올라온다 */}
           {headline ? (
             <button
               type="button"
@@ -343,11 +360,24 @@ export default function App() {
                 const matched = history.find((h) => h.url === headline.url);
                 if (matched) setSelectedItem(matched);
               }}
+              onMouseEnter={() => setHeadlinePaused(true)}
+              onMouseLeave={() => setHeadlinePaused(false)}
+              onFocus={() => setHeadlinePaused(true)}
+              onBlur={() => setHeadlinePaused(false)}
               title={headline.title}
-              className="flex-1 min-w-0 group text-center"
+              aria-label={`가장 많이 검증된 기사 ${headlineAt + 1}위: ${headline.title}`}
+              className="flex-1 min-w-0 h-full flex items-center justify-center overflow-hidden group"
             >
-              <span className="block truncate text-[12px] md:text-[13px] text-neutral-700 group-hover:text-neutral-900 group-hover:underline underline-offset-[3px] decoration-neutral-300 transition-colors">
-                {headline.title}
+              <span
+                key={headlineAt}
+                className="ticker-in flex items-center gap-2.5 min-w-0 max-w-full"
+              >
+                <span className="shrink-0 text-[11px] font-bold tabular-nums text-neutral-300">
+                  {headlineAt + 1}
+                </span>
+                <span className="truncate text-[12px] md:text-[13px] text-neutral-700 group-hover:text-neutral-900 group-hover:underline underline-offset-[3px] decoration-neutral-300 transition-colors">
+                  {headline.title}
+                </span>
               </span>
             </button>
           ) : (
@@ -391,10 +421,10 @@ export default function App() {
           {loading && (
             <div className="mt-8 border-t border-neutral-200 pt-4">
               <div className="flex items-baseline justify-between gap-4">
-                <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-neutral-500">
+                <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-500">
                   하이브리드 탐지 파이프라인
                 </span>
-                <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-neutral-900 animate-pulse">
+                <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-900 animate-pulse">
                   실시간 구동 중
                 </span>
               </div>
@@ -435,32 +465,33 @@ export default function App() {
             aria-live="polite"
             className={`mt-10 scroll-mt-20 border-t-4 ${tone.rule} pt-5 focus:outline-none`}
           >
-            <div className="flex items-baseline justify-between gap-4">
-              <p className={subKicker}>정밀 진단 레포트</p>
-              <div className="flex items-baseline gap-3 text-[10px] tabular-nums text-neutral-400">
+            <div className="flex items-start justify-between gap-4">
+              <p className={`${subKicker} pt-1.5`}>정밀 진단 레포트</p>
+              <div className="flex items-center gap-3 text-[11px] tabular-nums text-neutral-400">
                 {selectedItem.id != null && <span>NO.{selectedItem.id}</span>}
                 {selectedItem.created_at && <span>{new Date(selectedItem.created_at).toLocaleString()}</span>}
                 {selectedItem.cached && <span className="uppercase tracking-[0.14em]">캐시</span>}
                 <button
                   onClick={() => setSelectedItem(null)}
                   aria-label="레포트 닫기"
-                  className="text-neutral-300 hover:text-neutral-900 transition-colors"
+                  title="레포트 닫기"
+                  className="-mr-2 shrink-0 inline-flex items-center justify-center w-10 h-10 text-neutral-400 hover:text-neutral-900 hover:bg-neutral-50 transition-colors"
                 >
-                  <X size={14} />
+                  <X size={22} strokeWidth={1.75} />
                 </button>
               </div>
             </div>
 
             {/* 판정어 + 모순율 */}
             <div className="mt-3 flex flex-wrap items-end justify-between gap-x-8 gap-y-3">
-              <h2 className={`text-[44px] md:text-[64px] font-black leading-[0.9] tracking-[-0.04em] ${tone.text}`}>
+              <h2 className={`text-[36px] md:text-[48px] font-black leading-[0.9] tracking-[-0.04em] ${tone.text}`}>
                 {tone.label}
               </h2>
               <div className="text-right">
-                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-neutral-500">주장 모순율</p>
-                <p className={`mt-1 text-[34px] md:text-[44px] font-black tabular-nums leading-none ${tone.text}`}>
+                <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-500">주장 모순율</p>
+                <p className={`mt-1 text-[30px] md:text-[38px] font-bold tabular-nums leading-none ${tone.text}`}>
                   {(score * 100).toFixed(0)}
-                  <span className="text-[18px] md:text-[22px] align-top">%</span>
+                  <span className="text-[16px] md:text-[20px] align-top">%</span>
                 </p>
               </div>
             </div>
@@ -469,7 +500,7 @@ export default function App() {
               <div className={`h-full ${tone.bar} transition-all duration-500`} style={{ width: `${score * 100}%` }} />
             </div>
 
-            <h3 className="mt-7 text-[22px] md:text-[30px] font-bold leading-[1.3] tracking-[-0.02em] max-w-[34ch]">
+            <h3 className="mt-7 text-[22px] md:text-[28px] font-extrabold leading-[1.3] tracking-[-0.02em] max-w-[34ch]">
               {selectedItem.title}
             </h3>
 
@@ -506,7 +537,7 @@ export default function App() {
                       key={idx}
                       className="grid grid-cols-[3.5rem_1fr] md:grid-cols-[5rem_1fr] gap-x-4 md:gap-x-6 py-5"
                     >
-                      <span className={`pt-1 text-[10px] font-bold uppercase tracking-[0.14em] ${truthTone(c.truth)}`}>
+                      <span className={`pt-1 text-[11px] font-bold uppercase tracking-[0.14em] ${truthTone(c.truth)}`}>
                         {c.truth}
                       </span>
                       <div className="min-w-0">
@@ -526,7 +557,7 @@ export default function App() {
                 <ol className="mt-2 divide-y divide-neutral-200">
                   {sources.map((src, i) => (
                     <li key={i} className="grid grid-cols-[1.75rem_1fr] gap-x-3 py-4">
-                      <span className="text-[11px] font-black tabular-nums text-neutral-300 pt-0.5">
+                      <span className="text-[11px] font-bold tabular-nums text-neutral-300 pt-0.5">
                         {String(i + 1).padStart(2, "0")}
                       </span>
                       <div className="min-w-0">
@@ -540,7 +571,7 @@ export default function App() {
                           <ExternalLink size={10} className="inline ml-1 align-baseline text-neutral-400" />
                         </a>
                         <p className="mt-1 text-[12px] leading-[1.6] text-neutral-500 line-clamp-2">{src.description}</p>
-                        <p className="mt-1 text-[10px] tabular-nums text-neutral-400">
+                        <p className="mt-1 text-[11px] tabular-nums text-neutral-400">
                           {src.pubDate ?? src.pub_date ?? ""}
                         </p>
                       </div>
@@ -566,7 +597,7 @@ export default function App() {
                         <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-neutral-900">
                           {c.author}
                         </span>
-                        <span className="flex items-baseline gap-2 text-[10px] tabular-nums text-neutral-400">
+                        <span className="flex items-baseline gap-2 text-[11px] tabular-nums text-neutral-400">
                           {c.created_at && new Date(c.created_at).toLocaleDateString()}
                           {(c.user_token === userToken || !c.user_token) && (
                             <button
@@ -639,26 +670,26 @@ export default function App() {
 
           <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 divide-x divide-neutral-200">
             <div className="pr-5 sm:px-5 sm:first:pl-0">
-              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-neutral-500">총 검사</p>
-              <p className="mt-1.5 text-[28px] md:text-[36px] font-black tabular-nums leading-none text-neutral-900">
+              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-500">총 검사</p>
+              <p className="mt-1.5 text-[26px] md:text-[30px] font-bold tabular-nums leading-none text-neutral-900">
                 {stats.total_checks}
               </p>
             </div>
             <div className="pl-5 sm:px-5">
-              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-neutral-500">진짜</p>
-              <p className="mt-1.5 text-[28px] md:text-[36px] font-black tabular-nums leading-none text-success-700">
+              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-500">진짜</p>
+              <p className="mt-1.5 text-[26px] md:text-[30px] font-bold tabular-nums leading-none text-success-700">
                 {stats.real_count}
               </p>
             </div>
             <div className="pr-5 sm:px-5 mt-6 sm:mt-0">
-              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-neutral-500">가짜</p>
-              <p className="mt-1.5 text-[28px] md:text-[36px] font-black tabular-nums leading-none text-error-700">
+              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-500">가짜</p>
+              <p className="mt-1.5 text-[26px] md:text-[30px] font-bold tabular-nums leading-none text-error-700">
                 {stats.fake_count}
               </p>
             </div>
             <div className="pl-5 sm:px-5 mt-6 sm:mt-0">
-              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-neutral-500">의심</p>
-              <p className="mt-1.5 text-[28px] md:text-[36px] font-black tabular-nums leading-none text-warning-700">
+              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-500">의심</p>
+              <p className="mt-1.5 text-[26px] md:text-[30px] font-bold tabular-nums leading-none text-warning-700">
                 {stats.suspicious_count}
               </p>
             </div>
@@ -689,9 +720,9 @@ export default function App() {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-y border-neutral-900">
-                  <th className="py-2 pr-4 text-[10px] font-bold uppercase tracking-[0.16em] text-neutral-500">판정</th>
-                  <th className="py-2 pr-4 text-[10px] font-bold uppercase tracking-[0.16em] text-neutral-500">기사</th>
-                  <th className="py-2 pr-4 text-[10px] font-bold uppercase tracking-[0.16em] text-neutral-500 text-right">
+                  <th className="py-2 pr-4 text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-500">판정</th>
+                  <th className="py-2 pr-4 text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-500">기사</th>
+                  <th className="py-2 pr-4 text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-500 text-right">
                     모순
                   </th>
                   <th className="py-2 w-8" />
@@ -763,7 +794,7 @@ export default function App() {
           </div>
         </section>
 
-        <footer className="mt-20 border-t border-neutral-200 pt-4 flex items-baseline justify-between text-[10px] uppercase tracking-[0.16em] text-neutral-400">
+        <footer className="mt-20 border-t border-neutral-200 pt-4 flex items-baseline justify-between text-[11px] uppercase tracking-[0.16em] text-neutral-400">
           <span>Fake News Defender</span>
           <span>Powered by Gemini 2.5</span>
         </footer>
