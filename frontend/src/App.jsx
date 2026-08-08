@@ -119,6 +119,9 @@ export default function App() {
     return () => cancelAnimationFrame(raf);
   }, [selectedItem?.id, selectedItem?.url, view]);
 
+  // 실시간 탐지 현황에서 숫자를 눌러 히스토리를 판정별로 거른다 (null = 전체)
+  const [verdictFilter, setVerdictFilter] = useState(null);
+
   // 마스트헤드 헤드라인 티커 — 가장 많이 검증된 기사 Top 5를 하나씩 올린다
   const [headlineIdx, setHeadlineIdx] = useState(0);
   const [headlinePaused, setHeadlinePaused] = useState(false);
@@ -315,6 +318,22 @@ export default function App() {
   const tone = selectedItem ? verdictTone(selectedItem.verdict) : null;
   const score = selectedItem ? Number(selectedItem.contradiction_score ?? 0) : 0;
   const sources = selectedItem?.sources ?? [];
+
+  // 판정 필터 — 서버 통계와 같은 규칙(REAL/FAKE 외에는 모두 의심)으로 센다
+  const matchesVerdict = (v) => {
+    if (!verdictFilter) return true;
+    if (verdictFilter === "SUSPICIOUS") return v !== "REAL" && v !== "FAKE";
+    return v === verdictFilter;
+  };
+  const filteredHistory = history.filter((h) => matchesVerdict(h.verdict));
+
+  const statItems = [
+    { key: null, label: "총 검사", value: stats.total_checks, text: "text-neutral-900", rule: "border-neutral-900", bar: "bg-neutral-900" },
+    { key: "REAL", label: "진짜", value: stats.real_count, text: "text-success-700", rule: "border-success-500", bar: "bg-success-500" },
+    { key: "FAKE", label: "가짜", value: stats.fake_count, text: "text-error-700", rule: "border-error-500", bar: "bg-error-500" },
+    { key: "SUSPICIOUS", label: "의심", value: stats.suspicious_count, text: "text-warning-700", rule: "border-warning-500", bar: "bg-warning-500" },
+  ];
+  const activeStat = statItems.find((s) => s.key === verdictFilter);
 
   // 마스트헤드 헤드라인 = 가장 많이 검증된 기사 Top 5를 순환
   const headlines = rankings.most_checked ?? [];
@@ -669,31 +688,39 @@ export default function App() {
         <section className="mt-14 border-t border-neutral-900 pt-4">
           <h2 className={`${kicker} text-neutral-900`}>실시간 탐지 현황</h2>
 
+          {/* 숫자를 누르면 히스토리가 해당 판정으로 걸러진다 */}
           <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 divide-x divide-neutral-200">
-            <div className="pr-5 sm:px-5 sm:first:pl-0">
-              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-500">총 검사</p>
-              <p className="mt-1.5 text-[26px] md:text-[30px] font-bold tabular-nums leading-none text-neutral-900">
-                {stats.total_checks}
-              </p>
-            </div>
-            <div className="pl-5 sm:px-5">
-              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-500">진짜</p>
-              <p className="mt-1.5 text-[26px] md:text-[30px] font-bold tabular-nums leading-none text-success-700">
-                {stats.real_count}
-              </p>
-            </div>
-            <div className="pr-5 sm:px-5 mt-6 sm:mt-0">
-              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-500">가짜</p>
-              <p className="mt-1.5 text-[26px] md:text-[30px] font-bold tabular-nums leading-none text-error-700">
-                {stats.fake_count}
-              </p>
-            </div>
-            <div className="pl-5 sm:px-5 mt-6 sm:mt-0">
-              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-500">의심</p>
-              <p className="mt-1.5 text-[26px] md:text-[30px] font-bold tabular-nums leading-none text-warning-700">
-                {stats.suspicious_count}
-              </p>
-            </div>
+            {statItems.map((item, idx) => {
+              const active = verdictFilter === item.key;
+              const dimmed = verdictFilter !== null && !active;
+              return (
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={() => setVerdictFilter(item.key)}
+                  aria-pressed={active}
+                  title={item.key ? `${item.label} 판정만 보기` : "전체 보기"}
+                  className={`text-left group ${idx % 2 === 0 ? "pr-5 sm:px-5" : "pl-5 sm:px-5"} ${
+                    idx === 0 ? "sm:pl-0" : ""
+                  } ${idx >= 2 ? "mt-6 sm:mt-0" : ""}`}
+                >
+                  <p
+                    className={`text-[11px] font-bold uppercase tracking-[0.16em] transition-colors ${
+                      active ? "text-neutral-900" : "text-neutral-500 group-hover:text-neutral-900"
+                    }`}
+                  >
+                    {item.label}
+                  </p>
+                  <p
+                    className={`mt-1.5 inline-block pb-1 border-b-2 text-[26px] md:text-[30px] font-bold tabular-nums leading-none transition-colors ${
+                      dimmed ? "text-neutral-300" : item.text
+                    } ${active ? item.rule : "border-transparent"}`}
+                  >
+                    {item.value}
+                  </p>
+                </button>
+              );
+            })}
           </div>
 
           <div className="mt-5 flex h-[3px] w-full bg-neutral-200">
@@ -713,8 +740,22 @@ export default function App() {
         {/* §E 검증 히스토리 */}
         <section className="mt-14 border-t border-neutral-900 pt-4">
           <div className="flex items-baseline justify-between gap-4">
-            <h2 className={`${kicker} text-neutral-900`}>검증 히스토리</h2>
-            <span className="text-[11px] tabular-nums text-neutral-500">{history.length}건</span>
+            <div className="flex items-baseline gap-3 min-w-0">
+              <h2 className={`${kicker} text-neutral-900 shrink-0`}>검증 히스토리</h2>
+              {activeStat && activeStat.key && (
+                <button
+                  type="button"
+                  onClick={() => setVerdictFilter(null)}
+                  title="필터 해제"
+                  className={`inline-flex items-center gap-1.5 text-[11px] font-bold tracking-[0.12em] ${activeStat.text} hover:text-neutral-900 transition-colors`}
+                >
+                  <span className={`h-[3px] w-4 shrink-0 ${activeStat.bar}`} />
+                  {activeStat.label}만
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+            <span className="text-[11px] tabular-nums text-neutral-500 shrink-0">{filteredHistory.length}건</span>
           </div>
 
           <div className="mt-4 overflow-x-auto">
@@ -730,14 +771,16 @@ export default function App() {
                 </tr>
               </thead>
               <tbody>
-                {history.length === 0 ? (
+                {filteredHistory.length === 0 ? (
                   <tr>
                     <td colSpan="4" className="py-16 text-center text-[13px] text-neutral-400">
-                      검증 기록이 없습니다. 위에 링크를 입력해 첫 기사를 검증해 보세요.
+                      {verdictFilter
+                        ? `${activeStat?.label} 판정을 받은 기록이 없습니다.`
+                        : "검증 기록이 없습니다. 위에 링크를 입력해 첫 기사를 검증해 보세요."}
                     </td>
                   </tr>
                 ) : (
-                  history.map((item) => {
+                  filteredHistory.map((item) => {
                     const isSelected = selectedItem?.id === item.id;
                     const t = verdictTone(item.verdict);
                     const s = Number(item.contradiction_score) || 0;
