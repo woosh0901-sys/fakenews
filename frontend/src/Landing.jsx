@@ -149,7 +149,10 @@ export default function Landing({
 
       {/* 중앙 히어로 */}
       <main className="flex-1 flex flex-col items-center justify-center px-6 pb-20 -mt-6">
-        <p className={`float-in ${kicker} text-neutral-500`} style={{ animationDelay: "60ms" }}>
+        <p
+          className="float-in text-[17px] md:text-[21px] tracking-[0.01em] text-neutral-500"
+          style={{ animationDelay: "60ms" }}
+        >
           그 기사, 팩트일까요?
         </p>
 
