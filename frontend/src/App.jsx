@@ -31,8 +31,7 @@ export default function App() {
     total_checks: 0,
     real_count: 0,
     fake_count: 0,
-    suspicious_count: 0,
-    avg_contradiction_score: 0
+    suspicious_count: 0
   });
 
   const [rankings, setRankings] = useState({ most_checked: [], top_fakes: [] });
@@ -729,12 +728,6 @@ export default function App() {
             <div className="bg-warning-500" style={{ width: `${pct(stats.suspicious_count)}%` }} />
           </div>
 
-          <p className="mt-2.5 text-[11px] text-neutral-500">
-            평균 모순 점수{" "}
-            <span className="tabular-nums font-bold text-neutral-900">
-              {(Number(stats.avg_contradiction_score) || 0).toFixed(2)}
-            </span>
-          </p>
         </section>
 
         {/* §E 검증 히스토리 */}
@@ -765,7 +758,7 @@ export default function App() {
                   <th className="py-2 pr-4 text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-500">판정</th>
                   <th className="py-2 pr-4 text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-500">기사</th>
                   <th className="py-2 pr-4 text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-500 text-right">
-                    모순
+                    모순율
                   </th>
                   <th className="py-2 w-8" />
                 </tr>
@@ -818,7 +811,7 @@ export default function App() {
                             s > 0.6 ? "text-error-700" : s > 0.2 ? "text-warning-700" : "text-success-700"
                           }`}
                         >
-                          {s.toFixed(2)}
+                          {(s * 100).toFixed(0)}%
                         </td>
                         <td className="py-4 align-top text-right">
                           <button

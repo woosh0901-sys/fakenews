@@ -591,8 +591,8 @@ def extract_keywords_fast(title):
 def call_gemini_api(prompt, response_mime_type=None, temperature=None, max_output_tokens=None):
     """
     Gemini API를 호출하는 공통 함수.
-    gemini-2.5-flash를 우선 시도하고 실패하면 gemini-2.0-flash-lite로 폴백하며,
-    최대 2회 재시도(지수 백오프 적용)를 지원하여 일시적 서버 오류나 할당량 초과에 대응합니다.
+    gemini-3.5-flash-lite(500 RPD)를 1순위로 시도하고, 429 한도 도달 시 gemini-3.1-flash-lite(500 RPD)로 폴백하여
+    하루 총 1,000회의 무료 호출 한도를 제공합니다.
     인증 오류(401/403)는 즉시 중단하여 불필요한 API 호출을 방지합니다.
     """
     import time
@@ -600,8 +600,11 @@ def call_gemini_api(prompt, response_mime_type=None, temperature=None, max_outpu
         print("[-] GEMINI_API_KEY가 설정되지 않았거나 기본값입니다.")
         return None
     
-    # 사용할 모델 목록 (우선순위 순서)
-    models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"]
+    # 사용할 모델 목록 (하루 500회 지원 모델 2개로 전담 구성: 하루 총 1,000회)
+    models = [
+        "gemini-3.5-flash-lite",  # 1순위: 하루 500회
+        "gemini-3.1-flash-lite"   # 2순위: 하루 500회 (합계 1,000회)
+    ]
     
     # 서버리스 환경에서는 타임아웃을 짧게 설정하여 Vercel 60초 제한에 대비
     request_timeout = 20 if IS_SERVERLESS else 25

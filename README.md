@@ -1,176 +1,255 @@
-# 🛡️ [공학경진대회 출품작] Fake News Defender
-> **2단계 하이브리드(통계적 문맥 필터 & 실시간 RAG-LLM) 가짜뉴스 탐지 및 요소별 검증 시스템**
->
-> 본 작품은 가짜뉴스의 사회적 전파 속도를 차단하기 위해 **초고속 통계 필터(Stage 1)**와 **실시간 웹 RAG 기반 정밀 LLM 검증(Stage 2)**을 결합한 하이브리드 지능형 팩트체크 솔루션입니다. 
+# Fake News Defender
 
----
+뉴스 기사와 SNS 게시물의 주장을 실시간 검색 자료와 비교하는 AI 팩트체크 서비스입니다. 사용자는 뉴스, Instagram, X(트위터) 링크를 입력하고 `REAL`, `FAKE`, `SUSPICIOUS` 판정과 근거를 확인할 수 있습니다.
 
-## 📌 1. 작품 개요 및 문제 정의 (Problem Definition)
+이 문서는 현재 저장소의 구현을 기준으로 작성되었습니다.
 
-### 1.1. 사회적 배경 및 실제 문제점
-현대 사회에서 가짜뉴스(허위 조작 정보)는 소셜 미디어(SNS)와 온라인 커뮤니티를 통해 기하급수적으로 확산됩니다. 하지만 기존의 팩트체크 방식은 다음과 같은 기술적 한계를 가집니다:
-1. **과도한 분석 비용 및 지연 시간**: 기사 검증에 대형 언어 모델(LLM)을 전적으로 사용하면, 기당 수십~수백 원의 API 호출 비용과 10초 이상의 긴 대기 시간이 발생하여 실시간 탐지가 불가능합니다.
-2. **비정형 SNS/커뮤니티 루머의 검증 불가능**: 인스타그램, 커뮤니티 등의 글은 조사가 생략되거나 비격식적인 언어로 작성되어 기존 형태소 분석이나 포털 뉴스 키워드 매칭률이 극도로 떨어집니다.
-3. **해외 뉴스 인용 및 번역 왜곡 취약성**: 해외 기사 원문을 단순 요약하거나 국내로 들여오는 과정에서 발생하는 교묘한 오번역 및 왜곡을 원본 대조 없이 가려내기 어렵습니다.
+## 주요 기능
 
-### 1.2. 해결 방안 (Our Approach)
-본 작품은 **"실시간성·고신뢰"**를 달성하기 위해 **실시간 웹 RAG 기반 정밀 LLM 검증 파이프라인**을 설계하여 이 문제를 공학적으로 해결합니다.
-* **실시간 웹 RAG (DuckDuckGo + Naver News)**: 입력된 뉴스 기사나 SNS 루머의 본문을 전처리하고, 핵심 키워드를 추출하여 실시간 포털 및 웹 검색으로 신뢰도 높은 참고자료를 수집합니다.
-* **Gemini 팩트체크 엔진**: 수집된 참고 기사들의 실제 본문을 원본 레벨에서 교차 대조하고, Gemini 모델을 통해 내용상 모순이 있는지 정교하게 분석하여 신뢰도를 최종 판정합니다.
+- 뉴스 기사 URL의 제목과 본문 추출
+- Instagram 및 X(트위터) 게시물 링크 처리
+- 네이버 뉴스 API와 DuckDuckGo HTML 검색을 결합한 실시간 참고 자료 수집
+- 참고 기사 본문을 추가로 크롤링해 Gemini와 교차 검증
+- `REAL`, `FAKE`, `SUSPICIOUS` 판정
+- 기사 전체 판정 근거와 주장별 세부 판정(`claims_breakdown`) 표시
+- 교차 검증 출처와 원문 링크 제공
+- Supabase 기반 검증 히스토리, 통계, 댓글 저장
+- 최근 검증 결과 캐시와 가장 많이 검증된 기사 목록
+- Vite 개발 서버와 Vercel 서버리스 배포 지원
 
----
-
-## 🏗️ 2. 시스템 아키텍처 및 데이터 흐름 (Architecture Flow)
-
-본 시스템은 사용자가 의심스러운 URL을 입력하는 순간부터 최종 요소별 진실/거짓 판정 및 DB 영구 저장까지 단일 파이프라인으로 처리됩니다.
+## 동작 흐름
 
 ```mermaid
-graph TD
-    A[사용자 의심 URL 입력] --> B[기사 본문 Crawling & DOM 노이즈 제거]
-    B --> E[핵심 검색어 추출 및 검색 쿼리 정제]
-    E --> F[실시간 웹 검색: Naver News API + DuckDuckGo Web]
-    F --> G[RAG 컨텍스트 구축: 수집된 신뢰 기사 본문 수집]
-    G --> H[Gemini 1.5/2.5 Flash API 모순율 대조 분석]
-    H --> I{모순도 및 요소별 진실성 판정}
-    I -->|모순도 0.0| J[진짜 뉴스 REAL 판정]
-    I -->|모순도 > 0.6| K[가짜 뉴스 FAKE 판정]
-    I -->|모순도 0.1~0.5| L[의심/과장 SUSPICIOUS 판정]
-    J & K & L --> M[Supabase Cloud DB 영구 보존]
-    M --> N[Zinc Dark 테마 대시보드 실시간 시각화 및 진단 리포트 출력]
+flowchart TD
+    A[뉴스 또는 SNS URL 입력] --> B[본문 및 메타데이터 추출]
+    B --> C[핵심 키워드 추출]
+    C --> D[네이버 뉴스 검색]
+    C --> E[DuckDuckGo 웹 검색]
+    D --> F[참고 자료 병합 및 중복 제거]
+    E --> F
+    F --> G[참고 기사 최대 3건 본문 크롤링]
+    G --> H[Gemini 사실관계 교차 검증]
+    H --> I[REAL / FAKE / SUSPICIOUS 결과 생성]
+    I --> J[주장별 근거와 출처 반환]
+    J --> K[(Supabase 선택 저장)]
 ```
 
----
+검증 요청은 다음과 같이 처리됩니다.
 
-## 🛡️ 3. 핵심 공학적 해결 방법 (Engineering Solutions)
+1. URL 형식을 확인하고 기사 또는 SNS 본문을 추출합니다.
+2. 본문에서 검색용 핵심 키워드를 만들어 네이버와 DuckDuckGo에서 참고 자료를 찾습니다.
+3. 병합된 참고 자료 중 최대 3건의 실제 본문을 가져옵니다.
+4. Gemini가 검증 대상과 참고 자료를 비교해 판정 근거와 주장별 결과를 생성합니다.
+5. Supabase가 설정되어 있으면 결과와 참고 출처를 저장합니다. 설정되지 않은 경우에도 분석 결과는 반환되지만 히스토리와 통계는 비어 있습니다.
 
-### 3.1. SNS 비정형 텍스트 대응 LLM Query Refiner
-* 조사와 어근이 붕괴된 인스타그램 캡션이나 커뮤니티 게시물을 검증하기 위해, LLM이 글의 핵심 맥락을 인지하여 **포털 검색에 최적화된 명사 중심의 정제된 검색 쿼리**를 생성하는 에이전트 모듈을 내장했습니다.
+## 판정 결과
 
-### 3.2. 해외 원문 크롤링 기반 Cross-Border RAG
-* 기존 RAG 시스템이 검색 요약문(Snippet)에만 의존해 오류를 범하던 문제를 극복하기 위해, 상위 3개 교차 검증 참고 뉴스 기사의 **실제 DOM 본문 영역을 추적 크롤링(최대 1,200자)하여 컨텍스트로 삽입**합니다. 이를 통해 영어 등 다국어 원문과 한국어 번역 기사 간의 정보 왜곡을 원본 레벨에서 정확하게 대조합니다.
+| 값 | 의미 |
+| --- | --- |
+| `REAL` | 참고 자료와 주요 사실관계가 대체로 일치하는 기사 |
+| `FAKE` | 핵심 사실, 수치, 발언 또는 사건이 명백히 왜곡되거나 조작된 경우 |
+| `SUSPICIOUS` | 과장 또는 미확인 주장이 포함되어 추가 확인이 필요한 경우 |
 
-### 3.3. 요소별 진실/거짓 판정 (Claims Breakdown)
-* 단순 "진실/거짓"이라는 이분법적 판정을 넘어, 기사 내부에서 검증 가능한 다수의 팩트 항목을 식별하고 각 항목별로 **진실(Truth) / 거짓(Fake) / 판단유보(Under Discussion)** 세부 분류와 대조 분석 근거를 요소별로 분리 표출하여 신뢰도를 크게 높였습니다.
+분석 결과에는 전체 `reason`, 주장별 `claims_breakdown`, 교차 검증 `sources`가 포함됩니다. 모순율은 화면에서 퍼센트로 표시되며, 내부 API와 데이터베이스에는 `contradiction_score` 값으로 저장됩니다.
 
----
+## 기술 스택
 
-## 🎨 4. 구현 수준 및 디자인 Aesthetics (Implementation)
+- Frontend: React 19, Vite, Tailwind CSS, Axios, Lucide React
+- Backend: FastAPI, Pydantic, HTTPX
+- Crawling: Requests, BeautifulSoup4, lxml
+- Search: Naver News Search API, DuckDuckGo HTML search
+- LLM: Google Gemini API
+- Persistence: Supabase REST API
+- Deployment: Vercel Functions + Vite static build
 
-* **디자인 테마**: 최고급 Zinc 다크 모드 감성의 인터페이스를 구축하여 모던하고 신뢰성 높은 인상을 줍니다.
-* **실시간 탐지 흐름**: 실시간 기사 본문 크롤링, 실시간 교차 출처 검색 로드맵, 분석 에이전트 단계별 로딩 상태를 단계별 인터랙션으로 시각화하여 사용자가 공학적 판정 과정을 직관적으로 납득할 수 있게 설계했습니다.
-* **반응형 대시보드**: 기사 검증 기록(역대 검증 내역, 판정 분포 비율)을 Supabase Cloud DB와 연동하여 실시간 데이터베이스의 갱신 현황을 차트 및 목록으로 즉시 제공합니다.
+## 프로젝트 구조
 
----
-
-## 📊 5. 실증적 검증 결과 및 증명 (Verification Results)
-
-`run_load_test.py` 실시간 부하 테스트 검증 툴을 통해 본 작품의 공학적 유효성과 안정성을 증명했습니다.
-
-| 평가지표 | 결과치 | 공학적 의의 |
-| :--- | :---: | :--- |
-| **API 호출 성공률** | **100.00%** | 외부 의존성(Gemini/Supabase)과의 완벽한 API 연동 및 예외 처리 |
-| **검증 정확도** | **99.73%** | RAG 기반 교차 대조와 Gemini 2.5 Flash를 결합한 가짜뉴스 식별 수준 |
-| **실시간 분석 지연 시간** | **1.5 ~ 2.5 s** | 실시간 크롤링, 검색, RAG, 생성형 요약 및 DB 저장을 포함하는 전 단계 소요 시간 |
-
----
-
-## 📢 6. 대회 당일 시연 & 전시 시나리오 (Exhibition Demo Guide)
-
-본 작품은 대회 부스 및 발표장에서 관람객과 심사위원들이 직접 스마트폰이나 노트북으로 실시간 가짜뉴스를 판정해보는 인터랙티브 전시가 가능합니다.
-
-### 6.1. 준비 사항
-* 전시용 태블릿 또는 노트북 (프론트엔드 대시보드 화면을 띄워놓음)
-* 테스트용 검증 대상 URL 세트 준비:
-  1. **실제 정상 뉴스 URL**: 입력 시 실시간 포털 기사 대조 분석을 통해 2초 이내에 **"REAL (진짜)" 판정이 완료**되는 신속성 시연.
-  2. **가짜/조작 뉴스 URL 또는 인스타그램 루머 링크**: 입력 시 모순율 검증 결과에 따라 **"FAKE" 또는 "SUSPICIOUS" 판정**이 출력되며, 실시간 포털 검색 및 RAG 기사 대조가 로딩 맵으로 표현되는 과정 시연.
-  3. **claims_breakdown 요소별 판정 결과**: 분석 완료 후 각 쟁점 항목들이 카드 레이아웃으로 "진실", "거짓", "판단유보" 탭으로 나뉘어 세부 근거와 출처 링크가 표시되는 고도화된 기능 시연.
-
----
-
-## 📂 7. 개발 스택 및 폴더 구조 (Technical Stack)
-
-```
-├── backend_app.py           # FastAPI REST API 백엔드 진입점
-├── fact_checker_by_url.py   # 하이브리드 검증 핵심 파이프라인 (크롤링, RAG, LLM)
-├── naver_news_api.py        # 네이버 실시간 검색 연동 모듈
-├── run_load_test.py         # 실시간 API 및 DB 연동 부하 테스트 툴
-├── data/                    # 통계 학습 데이터셋 (진짜 뉴스 1,000건, 가짜 뉴스 112건)
-└── frontend/                # Vite React + Tailwind CSS 프론트엔드 소스
+```text
+.
+├── api/index.py                 # Vercel에서 FastAPI 앱을 노출하는 진입점
+├── backend_app.py               # FastAPI API 서버
+├── fact_checker_by_url.py       # 크롤링, 검색, Gemini 검증 파이프라인
+├── naver_news_api.py             # 환경변수 로드 및 네이버 뉴스 API 클라이언트
+├── data/
+│   └── supabase_indexes.sql      # Supabase 조회 성능용 인덱스
+├── frontend/
+│   ├── src/App.jsx               # 검증 결과, 히스토리, 통계, 댓글 화면
+│   ├── src/Landing.jsx           # 첫 화면과 URL 입력 화면
+│   ├── src/verdict.js            # 판정별 화면 스타일 규칙
+│   └── vite.config.js            # 로컬 `/api` 프록시 설정
+├── scripts/                      # 분석 및 부하 테스트용 보조 스크립트
+├── run_load_test.py              # API 부하 테스트 스크립트
+├── requirements.txt              # Python 의존성
+├── package.json                  # 루트 빌드 명령
+└── vercel.json                   # Vercel 빌드 및 라우팅 설정
 ```
 
----
+## 로컬 실행
 
-## 🚀 8. 설치 및 실행 방법 (Getting Started)
+### 1. 사전 요구 사항
 
-### 8.1. 데이터베이스 테이블 스키마 생성
-Supabase 웹 콘솔 **SQL Editor**에 아래 DDL 스크립트를 붙여넣어 관계형 스키마 및 Cascade 제약조건을 초기화합니다.
-```sql
-CREATE TABLE checks (
-    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-    url TEXT NOT NULL,
-    title TEXT NOT NULL,
-    verdict TEXT NOT NULL,
-    contradiction_score REAL NOT NULL,
-    nll_loss REAL,
-    reason TEXT NOT NULL,
-    stage INTEGER NOT NULL,
-    claims_breakdown JSONB, -- 요소별 개별 진실/거짓 판정 데이터
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
+- Python 3.10 이상
+- Node.js 18 이상
+- 선택 사항: Naver Developers 애플리케이션, Google Gemini API 키, Supabase 프로젝트
 
-CREATE TABLE check_references (
-    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-    check_id BIGINT REFERENCES checks(id) ON DELETE CASCADE NOT NULL,
-    title TEXT NOT NULL,
-    link TEXT NOT NULL,
-    description TEXT NOT NULL,
-    pub_date TEXT NOT NULL
-);
+### 2. Python 환경 설정
 
-CREATE TABLE check_comments (
-    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-    check_id BIGINT REFERENCES checks(id) ON DELETE CASCADE NOT NULL,
-    author TEXT NOT NULL DEFAULT '익명',
-    content TEXT NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
+프로젝트 루트에서 실행합니다.
 
-CREATE TABLE check_reactions (
-    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-    check_id BIGINT REFERENCES checks(id) ON DELETE CASCADE NOT NULL,
-    emoji TEXT NOT NULL,
-    count INTEGER NOT NULL DEFAULT 1,
-    UNIQUE (check_id, emoji)
-);
-
-ALTER TABLE checks DISABLE ROW LEVEL SECURITY;
-ALTER TABLE check_references DISABLE ROW LEVEL SECURITY;
-ALTER TABLE check_comments DISABLE ROW LEVEL SECURITY;
-ALTER TABLE check_reactions DISABLE ROW LEVEL SECURITY;
-```
-
-### 8.2. 환경 변수 설정 (`.env`)
-프로젝트 루트 폴더에 `.env` 파일을 생성하고 아래 양식에 맞추어 API 키를 입력합니다.
-```ini
-NAVER_CLIENT_ID=여러분의_네이버_클라이언트_ID
-NAVER_CLIENT_SECRET=여러분의_네이버_클라이언트_SECRET
-GEMINI_API_KEY=여러분의_GEMINI_API_KEY
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_KEY=your-supabase-anon-or-service-role-key
-```
-
-### 8.3. 백엔드 실행
-```bash
+```powershell
 python -m venv .venv
-source .venv/bin/activate  # Windows: .\.venv\Scripts\activate
-pip install fastapi uvicorn requests python-dotenv beautifulsoup4 lxml
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+macOS/Linux에서는 다음을 사용합니다.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 3. 환경 변수 설정
+
+프로젝트 루트에 `.env` 파일을 만들고 필요한 값을 입력합니다.
+
+```ini
+# Gemini 정밀 판정에 필요
+GEMINI_API_KEY=your_gemini_api_key
+
+# 네이버 뉴스 검색에 필요
+NAVER_CLIENT_ID=your_naver_client_id
+NAVER_CLIENT_SECRET=your_naver_client_secret
+
+# 선택 사항. 설정하면 히스토리, 통계, 댓글을 사용할 수 있습니다.
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=your_server_side_supabase_key
+```
+
+`SUPABASE_KEY`는 브라우저에 노출되지 않는 서버 측 키로 설정해야 합니다. `.env` 파일은 Git에 커밋하지 마세요.
+
+### 4. Supabase 테이블 설정
+
+Supabase SQL Editor에서 아래 스키마를 실행합니다.
+
+```sql
+create table if not exists checks (
+  id bigint generated by default as identity primary key,
+  url text not null,
+  title text not null,
+  verdict text not null,
+  contradiction_score real not null,
+  nll_loss real,
+  reason text not null,
+  stage integer not null,
+  claims_breakdown jsonb,
+  created_at timestamptz default current_timestamp
+);
+
+create table if not exists check_references (
+  id bigint generated by default as identity primary key,
+  check_id bigint references checks(id) on delete cascade not null,
+  title text not null,
+  link text not null,
+  description text not null,
+  pub_date text not null
+);
+
+create table if not exists check_comments (
+  id bigint generated by default as identity primary key,
+  check_id bigint references checks(id) on delete cascade not null,
+  author text not null default '익명',
+  content text not null,
+  user_token text,
+  created_at timestamptz default current_timestamp
+);
+```
+
+테이블 생성 후 `data/supabase_indexes.sql`을 실행하면 히스토리 정렬과 통계 조회에 필요한 인덱스가 추가됩니다. 운영 환경에서는 Supabase RLS 정책과 서버 키 권한을 별도로 설정하세요.
+
+### 5. 백엔드 실행
+
+첫 번째 터미널에서 실행합니다.
+
+```powershell
 python backend_app.py
 ```
 
-### 8.4. 프론트엔드 실행
-```bash
+FastAPI 서버는 기본적으로 `http://127.0.0.1:8000`에서 실행됩니다.
+
+### 6. 프론트엔드 실행
+
+두 번째 터미널에서 실행합니다.
+
+```powershell
 cd frontend
 npm install
 npm run dev
 ```
-웹 브라우저로 `http://localhost:5173`에 접속하여 실시간 대시보드 시연을 진행합니다.
+
+브라우저에서 `http://localhost:5173`을 엽니다. Vite가 `/api` 요청을 로컬 FastAPI 서버인 `http://127.0.0.1:8000`으로 프록시합니다.
+
+## API
+
+모든 API 경로는 `/api` prefix를 사용합니다.
+
+| Method | Path | 설명 |
+| --- | --- | --- |
+| `POST` | `/api/preview` | 분석 화면에 표시할 기사 제목, 본문, 출처를 빠르게 추출 |
+| `POST` | `/api/check` | URL 전체 팩트체크 실행 |
+| `GET` | `/api/history` | 검증 히스토리 조회 |
+| `DELETE` | `/api/history/{check_id}` | 검증 결과 삭제 |
+| `GET` | `/api/stats` | 전체 검사 수와 판정별 통계 조회 |
+| `GET` | `/api/stats/rankings` | 많이 검증된 기사와 주요 의심 결과 조회 |
+| `GET` | `/api/history/{check_id}/comments` | 결과별 댓글 조회 |
+| `POST` | `/api/history/{check_id}/comments` | 결과에 댓글 추가 |
+| `DELETE` | `/api/history/{check_id}/comments/{comment_id}` | 본인 댓글 삭제 |
+
+검증 요청 본문은 다음과 같습니다.
+
+```json
+{
+  "url": "https://example.com/news/article"
+}
+```
+
+개발 중 환경 확인에는 `/api/debug/env`와 `/api/debug/gemini`를 사용할 수 있습니다. 이 엔드포인트는 운영 환경에서 인증 없이 공개하지 않는 것을 권장합니다.
+
+## 빌드 및 배포
+
+루트에서 프론트엔드 production build를 실행합니다.
+
+```bash
+npm run build
+```
+
+이 명령은 `frontend` 의존성을 설치한 뒤 `frontend/dist`를 생성합니다.
+
+Vercel 배포 시에는 다음 환경 변수를 Project Settings에 등록합니다.
+
+- `GEMINI_API_KEY`
+- `NAVER_CLIENT_ID`
+- `NAVER_CLIENT_SECRET`
+- `SUPABASE_URL`
+- `SUPABASE_KEY`
+
+`vercel.json`이 `frontend/dist`를 정적 출력으로 사용하고 `/api/*` 요청을 `api/index.py`의 FastAPI 앱으로 연결합니다. 서버리스 실행 시간은 현재 설정상 최대 60초입니다.
+
+## 문제 해결
+
+- **히스토리와 통계가 비어 있음**: `SUPABASE_URL`과 `SUPABASE_KEY`가 설정되어 있는지, 테이블과 인덱스가 생성되어 있는지 확인합니다.
+- **Gemini 판정이 `SUSPICIOUS`로 유보됨**: `GEMINI_API_KEY`가 유효한지와 API 사용량 제한을 확인합니다. 로컬에서는 Gemini 실패 시 Ollama 폴백을 시도할 수 있지만, Vercel 서버리스에서는 로컬 Ollama를 사용할 수 없습니다.
+- **참고 출처가 부족함**: 네이버 키를 확인하고, DuckDuckGo 검색이 실행 가능한 네트워크인지 확인합니다.
+- **프론트엔드에서 API 연결 실패**: FastAPI 서버가 8000 포트에서 실행 중인지 확인합니다. Vite 개발 서버는 `/api`를 8000 포트로 전달합니다.
+
+## 개발 확인 명령
+
+```bash
+# 프론트엔드 production build
+npm run build
+
+# 프론트엔드 lint
+cd frontend
+npm run lint
+```
