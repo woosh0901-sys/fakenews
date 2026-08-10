@@ -3,6 +3,7 @@ import axios from "axios";
 import Landing from "./Landing";
 import { Trash2, ExternalLink, CheckCircle, Loader2, X, House } from "lucide-react";
 import { verdictTone, truthTone } from "./verdict";
+import useNarrow from "./useNarrow";
 
 const API_BASE_URL = "/api";
 
@@ -12,6 +13,9 @@ export default function App() {
 
   // 결과 섹션으로 스크롤하기 위한 참조
   const resultRef = useRef(null);
+
+  // 좁은 화면에서는 입력창 placeholder가 잘리므로 짧은 문구로 바꾼다
+  const isNarrow = useNarrow();
 
   // View state: 첫 접속은 랜딩, 검증 시작/대시보드 보기 클릭 시 대시보드로 전환
   const [view, setView] = useState("landing");
@@ -407,7 +411,7 @@ export default function App() {
       </header>
 
       <div className="view-in mx-auto w-full max-w-[1200px] px-6 md:px-10 pb-28 lg:grid lg:grid-cols-[minmax(0,1fr)_260px] lg:gap-x-12">
-      <main className="min-w-0">
+      <main className="min-w-0 lg:col-start-1 lg:row-start-1">
         {/* §A 검증 입력 */}
         <section className="pt-8 md:pt-10">
           <h1 className={`${kicker} text-neutral-500`}>인공지능 교차 검증</h1>
@@ -416,7 +420,7 @@ export default function App() {
               type="url"
               value={urlInput}
               onChange={(e) => setUrlInput(e.target.value)}
-              placeholder="검증할 뉴스·인스타그램·X 링크를 붙여 넣으세요"
+              placeholder={isNarrow ? "기사 링크 붙여넣기" : "검증할 뉴스·인스타그램·X 링크를 붙여 넣으세요"}
               required
               disabled={loading}
               className="flex-1 min-w-0 bg-transparent border-0 border-b-2 border-neutral-900 px-0 py-3 text-base md:text-lg text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:border-brand-500 transition-colors disabled:opacity-40"
@@ -729,7 +733,78 @@ export default function App() {
           </div>
 
         </section>
+      </main>
 
+      {/* 실시간 랭킹 레일 — 데스크톱은 우측 고정(자체 스크롤), 모바일은 히스토리 앞에 온다 */}
+      <aside className="mt-14 lg:mt-0 lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:self-start lg:sticky lg:top-[4.5rem] lg:pt-10 lg:max-h-[calc(100vh-5.5rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-1">
+        <div className="border-t border-neutral-900 pt-4">
+          <h2 className={`${kicker} text-neutral-900`}>실시간 랭킹</h2>
+
+          <h3 className={`mt-4 ${kicker} text-neutral-500`}>가장 많이 검증된 기사</h3>
+          {headlines.length === 0 ? (
+            <p className="mt-2 text-[11px] text-neutral-400">검증 통계가 없습니다.</p>
+          ) : (
+            <ol className="mt-2 border-t border-neutral-200 divide-y divide-neutral-200">
+              {headlines.map((item, idx) => (
+                <li key={idx}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const matched = history.find((h) => h.url === item.url);
+                      if (matched) setSelectedItem(matched);
+                    }}
+                    className="w-full flex items-baseline gap-2.5 py-2.5 text-left group"
+                  >
+                    <span className="w-3 shrink-0 text-[11px] font-bold tabular-nums text-neutral-300">
+                      {idx + 1}
+                    </span>
+                    <span className="flex-1 min-w-0 text-[12px] leading-[1.5] text-neutral-800 line-clamp-2 group-hover:underline underline-offset-[3px] decoration-neutral-300">
+                      {item.title}
+                    </span>
+                    <span className="shrink-0 text-[11px] tabular-nums text-neutral-400">{item.count}회</span>
+                  </button>
+                </li>
+              ))}
+            </ol>
+          )}
+
+          <h3 className={`mt-8 ${kicker} text-neutral-500`}>모순율이 가장 높은 기사</h3>
+          {(rankings.top_fakes ?? []).length === 0 ? (
+            <p className="mt-2 text-[11px] text-neutral-400">검출된 거짓 기사가 없습니다.</p>
+          ) : (
+            <ol className="mt-2 border-t border-neutral-200 divide-y divide-neutral-200">
+              {(rankings.top_fakes ?? []).map((item, idx) => {
+                const t = verdictTone(item.verdict);
+                return (
+                  <li key={idx}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const matched = history.find((h) => h.url === item.url);
+                        if (matched) setSelectedItem(matched);
+                      }}
+                      className="w-full flex items-baseline gap-2.5 py-2.5 text-left group"
+                    >
+                      <span className="w-3 shrink-0 text-[11px] font-bold tabular-nums text-neutral-300">
+                        {idx + 1}
+                      </span>
+                      <span className="flex-1 min-w-0 text-[12px] leading-[1.5] text-neutral-800 line-clamp-2 group-hover:underline underline-offset-[3px] decoration-neutral-300">
+                        {item.title}
+                      </span>
+                      <span className={`shrink-0 text-[11px] tabular-nums font-bold ${t.text}`}>
+                        {((Number(item.contradiction_score) || 0) * 100).toFixed(0)}%
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </div>
+      </aside>
+
+      {/* 히스토리 — 데스크톱은 좌측 컬럼 아래쪽, 모바일은 랭킹 다음 */}
+      <div className="min-w-0 lg:col-start-1 lg:row-start-2">
         {/* §E 검증 히스토리 */}
         <section className="mt-14 border-t border-neutral-900 pt-4">
           <div className="flex items-baseline justify-between gap-4">
@@ -757,7 +832,7 @@ export default function App() {
                 <tr className="border-y border-neutral-900">
                   <th className="py-2 pr-4 text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-500">판정</th>
                   <th className="py-2 pr-4 text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-500">기사</th>
-                  <th className="py-2 pr-4 text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-500 text-right">
+                  <th className="py-2 pr-4 text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-500 text-right whitespace-nowrap">
                     모순율
                   </th>
                   <th className="py-2 w-8" />
@@ -835,75 +910,7 @@ export default function App() {
           <span>Fake News Defender</span>
           <span>Powered by Gemini 2.5</span>
         </footer>
-      </main>
-
-      {/* 실시간 랭킹 레일 — 데스크톱은 우측 고정, 모바일은 본문 아래로 흐른다 */}
-      <aside className="mt-14 lg:mt-0 lg:pt-10 lg:sticky lg:top-[4.5rem] lg:self-start">
-        <div className="border-t border-neutral-900 pt-4">
-          <h2 className={`${kicker} text-neutral-900`}>실시간 랭킹</h2>
-
-          <h3 className={`mt-4 ${kicker} text-neutral-500`}>가장 많이 검증된 기사</h3>
-          {headlines.length === 0 ? (
-            <p className="mt-2 text-[11px] text-neutral-400">검증 통계가 없습니다.</p>
-          ) : (
-            <ol className="mt-2 border-t border-neutral-200 divide-y divide-neutral-200">
-              {headlines.map((item, idx) => (
-                <li key={idx}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const matched = history.find((h) => h.url === item.url);
-                      if (matched) setSelectedItem(matched);
-                    }}
-                    className="w-full flex items-baseline gap-2.5 py-2.5 text-left group"
-                  >
-                    <span className="w-3 shrink-0 text-[11px] font-bold tabular-nums text-neutral-300">
-                      {idx + 1}
-                    </span>
-                    <span className="flex-1 min-w-0 text-[12px] leading-[1.5] text-neutral-800 line-clamp-2 group-hover:underline underline-offset-[3px] decoration-neutral-300">
-                      {item.title}
-                    </span>
-                    <span className="shrink-0 text-[11px] tabular-nums text-neutral-400">{item.count}회</span>
-                  </button>
-                </li>
-              ))}
-            </ol>
-          )}
-
-          <h3 className={`mt-8 ${kicker} text-neutral-500`}>모순율이 가장 높은 기사</h3>
-          {(rankings.top_fakes ?? []).length === 0 ? (
-            <p className="mt-2 text-[11px] text-neutral-400">검출된 거짓 기사가 없습니다.</p>
-          ) : (
-            <ol className="mt-2 border-t border-neutral-200 divide-y divide-neutral-200">
-              {(rankings.top_fakes ?? []).map((item, idx) => {
-                const t = verdictTone(item.verdict);
-                return (
-                  <li key={idx}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const matched = history.find((h) => h.url === item.url);
-                        if (matched) setSelectedItem(matched);
-                      }}
-                      className="w-full flex items-baseline gap-2.5 py-2.5 text-left group"
-                    >
-                      <span className="w-3 shrink-0 text-[11px] font-bold tabular-nums text-neutral-300">
-                        {idx + 1}
-                      </span>
-                      <span className="flex-1 min-w-0 text-[12px] leading-[1.5] text-neutral-800 line-clamp-2 group-hover:underline underline-offset-[3px] decoration-neutral-300">
-                        {item.title}
-                      </span>
-                      <span className={`shrink-0 text-[11px] tabular-nums font-bold ${t.text}`}>
-                        {((Number(item.contradiction_score) || 0) * 100).toFixed(0)}%
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
-          )}
-        </div>
-      </aside>
+      </div>
       </div>
     </div>
   );

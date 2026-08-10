@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { ArrowRight, Loader2, CheckCircle } from "lucide-react";
 import { verdictTone } from "./verdict";
+import useNarrow from "./useNarrow";
 
 // 행별 페이드 감쇠 (아래로 갈수록 흐려지는 스택)
 const ROW_OPACITY = [1, 0.72, 0.55, 0.4, 0.28];
@@ -12,6 +13,8 @@ export default function Landing({
 }) {
   const [url, setUrl] = useState("");
   const [error, setError] = useState("");
+  // 좁은 화면에서는 입력창 placeholder가 잘리므로 짧은 문구로 바꾼다
+  const isNarrow = useNarrow();
   const [offset, setOffset] = useState(0);
   const [paused, setPaused] = useState(false);
 
@@ -157,10 +160,11 @@ export default function Landing({
         </p>
 
         <h1
-          className="float-in mt-4 text-[34px] md:text-[56px] font-black leading-[1.05] tracking-[-0.04em] text-center text-balance text-neutral-900"
+          className="float-in mt-4 text-[34px] md:text-[56px] font-black leading-[1.05] tracking-[-0.04em] text-center md:text-balance text-neutral-900"
           style={{ animationDelay: "140ms" }}
         >
-          AI에게 팩트를 체크해보세요.
+          {/* 모바일에서는 'AI에게' 뒤에서 줄을 바꾼다 */}
+          AI에게<br className="md:hidden" /> 팩트를 체크해보세요.
         </h1>
 
         {/* 링크 입력 */}
@@ -178,7 +182,7 @@ export default function Landing({
                 setUrl(e.target.value);
                 if (error) setError("");
               }}
-              placeholder="검증할 뉴스·인스타그램·X 링크를 붙여 넣으세요"
+              placeholder={isNarrow ? "기사 링크 붙여넣기" : "검증할 뉴스·인스타그램·X 링크를 붙여 넣으세요"}
               disabled={loading}
               aria-invalid={!!error}
               className={`flex-1 min-w-0 bg-transparent border-0 border-b-2 px-0 py-3 text-base md:text-lg text-neutral-900 placeholder:text-neutral-400 focus:outline-none transition-colors disabled:opacity-40 ${

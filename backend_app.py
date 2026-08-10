@@ -24,6 +24,10 @@ if SUPABASE_URL:
     if SUPABASE_URL.endswith("/"):
         SUPABASE_URL = SUPABASE_URL[:-1]
 
+# 히스토리 목록에 노출할 최신 검증 개수. 데이터는 지우지 않고 조회만 제한하므로
+# 통계·랭킹의 누적 집계에는 영향을 주지 않는다.
+HISTORY_LIMIT = 25
+
 SUPABASE_ENABLED = bool(SUPABASE_URL and SUPABASE_KEY and SUPABASE_URL != "여기에_프로젝트_URL_입력")
 if not SUPABASE_ENABLED:
     print("[-] 경고: Supabase URL 또는 API Key가 설정되지 않았습니다. 검사 결과가 저장되지 않으며 히스토리/통계는 빈 값으로 응답합니다.")
@@ -262,8 +266,13 @@ async def get_history():
         return []
     try:
         headers = get_supabase_headers()
-        # Fetch checks joining with check_references as 'sources' sorting by created_at desc
-        url = f"{SUPABASE_URL}/rest/v1/checks?select=*,sources:check_references(*)&order=created_at.desc"
+        # Fetch checks joining with check_references as 'sources' sorting by created_at desc.
+        # 최신 HISTORY_LIMIT건만 내려준다. 행 자체는 지우지 않으므로 /api/stats 와
+        # /api/stats/rankings 의 누적 집계는 그대로 유지된다.
+        url = (
+            f"{SUPABASE_URL}/rest/v1/checks?select=*,sources:check_references(*)"
+            f"&order=created_at.desc&limit={HISTORY_LIMIT}"
+        )
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(url, headers=headers)
             if resp.status_code != 200:
