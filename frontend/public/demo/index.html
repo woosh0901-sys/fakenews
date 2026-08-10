@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>⚡ 찌라시DB | 가짜뉴스 판별 데모</title>
+<style>
+  :root { --ink:#111; --muted:#6b7280; --line:#e5e7eb; --hot:#d92d20; }
+  * { box-sizing: border-box; }
+  body {
+    margin:0; background:#fff; color:var(--ink);
+    font-family:"Helvetica Neue",Helvetica,Arial,"SUIT Variable",SUIT,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap { max-width:760px; margin:0 auto; padding:0 20px 80px; }
+  header { border-bottom:3px solid var(--ink); }
+  .brand { max-width:760px; margin:0 auto; padding:18px 20px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .logo { font-size:20px; font-weight:900; letter-spacing:-.02em; }
+  .warn { font-size:11px; font-weight:700; color:var(--hot); border:1px solid var(--hot); padding:4px 8px; }
+  h1 { font-size:26px; font-weight:900; letter-spacing:-.02em; margin:36px 0 6px; }
+  .lede { color:var(--muted); font-size:14px; line-height:1.7; margin:0 0 28px; }
+  ul { list-style:none; padding:0; margin:0; border-top:1px solid var(--ink); }
+  li { border-bottom:1px solid var(--line); }
+  a.item { display:block; padding:18px 0; text-decoration:none; color:inherit; }
+  a.item:hover .t { text-decoration:underline; }
+  .badge { display:inline-block; font-size:11px; font-weight:700; color:var(--hot); margin-bottom:6px; }
+  .t { font-size:17px; font-weight:700; line-height:1.45; }
+  .d { margin-top:6px; font-size:13px; color:var(--muted); line-height:1.6; }
+  footer { border-top:1px solid var(--line); margin-top:48px; padding-top:16px; font-size:12px; color:var(--muted); line-height:1.8; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <span class="logo">⚡ 찌라시DB</span>
+    <span class="warn">⚠️ 데모용 허위 기사 — 실제 보도가 아닙니다</span>
+  </div>
+</header>
+
+<div class="wrap">
+  <h1>가짜뉴스 판별 데모 기사</h1>
+  <p class="lede">
+    Fake News Defender의 판별 성능을 시연하기 위해 제작된 페이지입니다.
+    아래 기사들은 실제로 보도된 사안을 소재로 하되, 수치와 발언을 의도적으로 왜곡해 작성한 <strong>허위 기사</strong>입니다.
+    링크를 복사해 판별기에 넣으면 실시간 검색으로 수집한 실제 보도와 대조해 판정합니다.
+  </p>
+
+  <ul>
+    <li>
+      <a class="item" href="./minimum-wage.html">
+        <span class="badge">🏛️ 쇼킹 사회</span>
+        <div class="t">[단독] 내년 최저임금 시급 2만 4천원 전격 확정… 심의 3시간 만에 만장일치</div>
+        <div class="d">최저임금 결정이라는 실제 사안에 금액·심의 과정·시행 시점을 왜곡해 넣었습니다.</div>
+      </a>
+    </li>
+    <li>
+      <a class="item" href="./power-demand.html">
+        <span class="badge">⚡ 핫 이슈</span>
+        <div class="t">[속보] 최대전력수요 300GW 돌파… 전국 순환단전 초읽기</div>
+        <div class="d">여름철 전력수요 최고치 경신 보도에 설비용량을 훌쩍 넘는 수치를 붙였습니다.</div>
+      </a>
+    </li>
+    <li>
+      <a class="item" href="./semiconductor.html">
+        <span class="badge">💹 머니 특종</span>
+        <div class="t">[충격] 반도체 수출 900% 폭증… 단일 품목 최초 1조 달러 돌파</div>
+        <div class="d">월간 반도체 수출 실적 발표에 증가율과 총액을 비현실적으로 부풀렸습니다.</div>
+      </a>
+    </li>
+  </ul>
+
+  <footer>
+    ⚠️ <strong>고지</strong> — 이 페이지의 모든 기사는 가짜뉴스 판별 시스템을 테스트할 목적으로 만든 <strong>허구</strong>입니다.
+    기사에 담긴 수치·발언·인용은 사실이 아니며, 어떤 언론사의 실제 보도와도 관계가 없습니다.
+    외부에 인용하거나 사실처럼 공유하지 마십시오.
+  </footer>
+</div>
+
+</body>
+</html>
