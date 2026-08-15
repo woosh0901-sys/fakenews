@@ -31,11 +31,11 @@ def fetch_naver_news(client_id, client_secret, query, display_count=5):
     """
     # 검색어 인코딩
     enc_text = urllib.parse.quote(query)
-    url = f"https://openapi.naver.com/v1/search/news.json?query={enc_text}&display={display_count}&sort=sim"
+    url = f"https://naverapihub.apigw.ntruss.com/search/v1/news?query={enc_text}&display={display_count}&sort=sim"
     
     headers = {
-        "X-Naver-Client-Id": client_id,
-        "X-Naver-Client-Secret": client_secret
+        "X-NCP-APIGW-API-KEY-ID": client_id,
+        "X-NCP-APIGW-API-KEY": client_secret
     }
     
     try:
