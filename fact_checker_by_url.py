@@ -4,14 +4,15 @@ import requests
 import json
 import re
 import math
+import ipaddress
+import socket
+import urllib.parse
 from bs4 import BeautifulSoup
 
 # Import Naver News API module from local folder robustly
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from naver_news_api import fetch_naver_news
 from security_utils import safe_http_get, validate_url_safe, sanitize_text, sanitize_gemini_output
-
-# Trigram language model imports removed
 
 OLLAMA_GENERATE_URL = "http://localhost:11434/api/generate"
 MODEL_NAME = "qwen3.5:latest"
@@ -25,6 +26,52 @@ from naver_news_api import NAVER_CLIENT_ID, NAVER_CLIENT_SECRET, GEMINI_API_KEY
 class GeminiRateLimitError(Exception):
     """Gemini API 429 Too Many Requests 예외"""
     pass
+
+def is_safe_url(url: str) -> bool:
+    """
+    SSRF(Server-Side Request Forgery) 방어:
+    사설 IP, 루프백, 클라우드 메타데이터 IP, 로컬호스트 주소에 대한 크롤링 요청을 차단합니다.
+    """
+    if not url or not isinstance(url, str):
+        return False
+    try:
+        parsed = urllib.parse.urlparse(url.strip())
+        if parsed.scheme not in ("http", "https"):
+            return False
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+        hostname_lower = hostname.lower().strip()
+        
+        # 1. 로컬 호스트 및 메타데이터 도메인 차단
+        blocked_hosts = {
+            "localhost", "127.0.0.1", "0.0.0.0", "::1", "metadata.google.internal",
+            "169.254.169.254", "instance-data"
+        }
+        if hostname_lower in blocked_hosts or hostname_lower.endswith((".local", ".internal", ".localhost")):
+            return False
+            
+        # 2. IP 직결 요청 검증
+        try:
+            ip = ipaddress.ip_address(hostname_lower)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or str(ip).startswith("169.254."):
+                return False
+        except ValueError:
+            # 3. 도메인명인 경우 DNS 조회 후 사설 IP 여부 검증
+            try:
+                addr_info = socket.getaddrinfo(hostname_lower, None)
+                for addr in addr_info:
+                    ip_str = addr[4][0]
+                    ip = ipaddress.ip_address(ip_str)
+                    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or str(ip).startswith("169.254."):
+                        return False
+            except Exception:
+                # DNS 해석 불가 시 이후 크롤링에서 안전하게 예외 처리됨
+                pass
+                
+        return True
+    except Exception:
+        return False
 
 def fetch_duckduckgo_search(query, max_results=3):
     """
@@ -136,6 +183,9 @@ def extract_news_urls_from_text(text, exclude_url=None):
             
         # naver.com의 경우 news.naver.com, n.news.naver.com 등 기사 링크만 허용하고 나머지는 필터링
         if "naver.com" in url and "news.naver" not in url:
+            continue
+            
+        if not is_safe_url(url):
             continue
             
         if url not in seen:
@@ -439,6 +489,10 @@ def scrape_url_content(url, timeout=5):
     주어진 URL 웹페이지를 크롤링하여 기사 제목과 본문을 추출합니다.
     (SSRF 방어 및 안전한 HTTP 요청 적용)
     """
+    if not is_safe_url(url):
+        print(f"[-] 안전하지 않거나 사설망(SSRF 위험)으로 판별된 URL 접근 거부: {url}")
+        return None
+        
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
@@ -1149,7 +1203,7 @@ def generate_search_query_via_llm(title, content):
         print(f"[-] LLM 검색어 생성 실패: {e}")
     return None
 
-def check_url_validity(url, nll_model=None, nll_threshold=5.6):
+def check_url_validity(url):
     """
     주어진 URL을 크롤링하여 팩트 체크를 전체 수행하는 핵심 파이프라인 함수
     1) URL 보안 검증 및 본문 추출 -> 2) 검색 키워드 추출 -> 3) 8~10개 후보 검색 및 3~4개 독립 근거 선별 -> 4) LLM 정밀 교차 대조
@@ -1194,10 +1248,7 @@ def check_url_validity(url, nll_model=None, nll_threshold=5.6):
         print(f"    - 기사 제목: {article['title']}")
         print(f"    - 본문 길이: {len(article['content'])} 자 추출 완료.")
 
-        # === 1단계: NLL 통계 필터 검사 (완전히 제거됨) ===
-        nll_loss = None
-            
-        # === 2단계: RAG-LLM 팩트체크 ===
+        # === 실시간 RAG-LLM 팩트체크 ===
         print("\n[2] 로컬 텍스트 분석 기반 핵심 검색 키워드 추출 중...")
         # SNS는 '[플랫폼] 유저명:' 접두어를 제외한 본문에서 키워드 추출
         search_base = article.get('search_text') or article['title']
@@ -1245,8 +1296,8 @@ def check_url_validity(url, nll_model=None, nll_threshold=5.6):
         # 입력 정보 병합 및 호환성 보장
         result['target_title'] = article['title']
         result['target_url'] = url
-        result['nll_loss'] = round(nll_loss, 4) if nll_loss else None
-        result['stage'] = 2
+        result['nll_loss'] = None
+        result['stage'] = 1
         result['sources'] = sources
         
         if 'evidence_quality' not in result:
@@ -1259,19 +1310,22 @@ def check_url_validity(url, nll_model=None, nll_threshold=5.6):
         return result
     except GeminiRateLimitError as re:
         print(f"[-] Gemini API Rate Limit 감지되어 판정을 일시 유보합니다: {re}")
+        # fallback으로 안전한 SUSPICIOUS 결과를 제공하며, DB 저장을 건너뛰도록 transient_error=True 설정
         return {
             "verdict": "SUSPICIOUS",
-            "reason": "Gemini API의 분당 호출량 한도(429 Too Many Requests)를 초과하여 최종 판정을 유보합니다. 무료 API 키를 이용 중인 경우 일시적으로 발생할 수 있으니, 1분 후 다시 시도해 주세요.",
+            "reason": "Gemini API의 분당 호출량 한도(429 Too Many Requests)를 초과하여 최종 판정을 유보합니다. 무료 API 키를 이용 중인 경우 일시적으로 발생할 수 있으니, 약 1분 후 다시 시도해 주세요.",
             "contradiction_score": 0.5,
             "evidence_quality": 0.0,
             "independent_source_count": 0,
             "primary_source_found": False,
             "target_title": article['title'] if 'article' in locals() and article else "추출된 기사/게시글",
             "target_url": url,
-            "nll_loss": round(nll_loss, 4) if 'nll_loss' in locals() and nll_loss else None,
-            "stage": 2,
+            "nll_loss": None,
+            "stage": 1,
             "sources": [],
-            "claims_breakdown": []
+            "claims_breakdown": [],
+            "transient_error": True,
+            "warning": "API 일시적 호출량 제한(429)으로 인해 판정이 유보되었으며 데이터베이스에 저장되지 않았습니다."
         }
 
 if __name__ == "__main__":
@@ -1297,9 +1351,6 @@ if __name__ == "__main__":
         print("🛡️  가짜뉴스 실시간 탐지 결과")
         print("=============================================")
         print(f"▶ 검증 대상 기사: {final_verdict['target_title']}")
-        print(f"▶ 탐지 경로 (Stage): {final_verdict['stage']}단계 필터")
-        if 'nll_loss' in final_verdict and final_verdict['nll_loss']:
-            print(f"▶ 문맥 손실값 (NLL Loss): {final_verdict['nll_loss']}")
         print(f"▶ 탐지 결과 (Verdict): {final_verdict['verdict']}")
         print(f"▶ 모순도 점수 (Score): {final_verdict['contradiction_score']}")
         print(f"▶ 분석 근거:")
