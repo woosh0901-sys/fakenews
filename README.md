@@ -1,101 +1,126 @@
 # 🛡️ [공학경진대회 출품작] Fake News Defender
-> **2단계 하이브리드(통계적 문맥 필터 & 실시간 RAG-LLM) 가짜뉴스 탐지 및 요소별 검증 시스템**
+> **실시간 웹 RAG & Gemini LLM 기반 지능형 가짜뉴스 탐지 및 요소별(Claims) 팩트체크 시스템**
 >
-> 본 작품은 가짜뉴스의 사회적 전파 속도를 차단하기 위해 **초고속 통계 필터(Stage 1)**와 **실시간 웹 RAG 기반 정밀 LLM 검증(Stage 2)**을 결합한 하이브리드 지능형 팩트체크 솔루션입니다. 
+> 본 작품은 가짜뉴스의 사회적 전파 속도를 차단하기 위해 **실시간 웹/포털 검색(Naver News & DuckDuckGo)**과 **Gemini 2.5 Flash LLM**을 결합한 실시간 지능형 팩트체크 솔루션입니다. 기사·SNS·커뮤니티 루머의 사실 관계를 원본 레벨에서 교차 대조하고, 기사 내 세부 주장별 진실/거짓 분류(Claims Breakdown)를 제공합니다.
 
 ---
 
 ## 📌 1. 작품 개요 및 문제 정의 (Problem Definition)
 
 ### 1.1. 사회적 배경 및 실제 문제점
-현대 사회에서 가짜뉴스(허위 조작 정보)는 소셜 미디어(SNS)와 온라인 커뮤니티를 통해 기하급수적으로 확산됩니다. 하지만 기존의 팩트체크 방식은 다음과 같은 기술적 한계를 가집니다:
-1. **과도한 분석 비용 및 지연 시간**: 기사 검증에 대형 언어 모델(LLM)을 전적으로 사용하면, 기당 수십~수백 원의 API 호출 비용과 10초 이상의 긴 대기 시간이 발생하여 실시간 탐지가 불가능합니다.
-2. **비정형 SNS/커뮤니티 루머의 검증 불가능**: 인스타그램, 커뮤니티 등의 글은 조사가 생략되거나 비격식적인 언어로 작성되어 기존 형태소 분석이나 포털 뉴스 키워드 매칭률이 극도로 떨어집니다.
-3. **해외 뉴스 인용 및 번역 왜곡 취약성**: 해외 기사 원문을 단순 요약하거나 국내로 들여오는 과정에서 발생하는 교묘한 오번역 및 왜곡을 원본 대조 없이 가려내기 어렵습니다.
+현대 사회에서 가짜뉴스(허위 조작 정보)는 소셜 미디어(인스타그램, X)와 온라인 커뮤니티를 통해 기하급수적으로 확산됩니다. 하지만 기존의 팩트체크 방식은 다음과 같은 기술적 한계를 가집니다:
+1. **과도한 분석 비용 및 지연 시간**: 기사 검증에 정제되지 않은 프롬프트로 대형 언어 모델(LLM)을 호출하면 불필요한 API 호출 비용과 긴 대기 시간이 발생합니다.
+2. **비정형 SNS/커뮤니티 루머의 검증 불가능**: 인스타그램 릴스 캡션, 커뮤니티 글은 비격식적 구어체로 작성되어 기존 키워드 매칭률이 극도로 떨어집니다.
+3. **해외 뉴스 인용 및 번역 왜곡 취약성**: 해외 기사 원문을 단순 요약하거나 국내로 들여오는 과정에서 발생하는 교묘한 오번역 및 수치 왜곡을 원본 대조 없이 가려내기 어렵습니다.
 
 ### 1.2. 해결 방안 (Our Approach)
-본 작품은 **"실시간성·고신뢰"**를 달성하기 위해 **실시간 웹 RAG 기반 정밀 LLM 검증 파이프라인**을 설계하여 이 문제를 공학적으로 해결합니다.
-* **실시간 웹 RAG (DuckDuckGo + Naver News)**: 입력된 뉴스 기사나 SNS 루머의 본문을 전처리하고, 핵심 키워드를 추출하여 실시간 포털 및 웹 검색으로 신뢰도 높은 참고자료를 수집합니다.
-* **Gemini 팩트체크 엔진**: 수집된 참고 기사들의 실제 본문을 원본 레벨에서 교차 대조하고, Gemini 모델을 통해 내용상 모순이 있는지 정교하게 분석하여 신뢰도를 최종 판정합니다.
+본 작품은 **"실시간성·고신뢰·비용 효율성"**을 달성하기 위해 **단일화된 실시간 웹 RAG 기반 정밀 LLM 검증 파이프라인**을 구축했습니다:
+* **하이브리드 실시간 웹 RAG (Naver News API + DuckDuckGo Web)**: 기사 본문과 본문 내 링크된 원본 언론사 기사를 자동 수집하고, 핵심 키워드를 추출하여 실시간 포털 및 웹 검색으로 신뢰도 높은 교차 대조군을 확보합니다.
+* **Gemini 팩트체크 엔진**: 수집된 참고 기사들의 실제 DOM 본문 영역을 원본 레벨에서 교차 대조하고, Gemini 모델을 통해 모순율(Contradiction Score)과 요소별 세부 진실성을 정밀 판정합니다.
+* **스마트 24시간 DB 캐싱**: 24시간 이내 동일 URL 검사 시 '진실(REAL)' 판정 기사는 즉시 DB 캐시에서 응답하고, '가짜(FAKE)/의심(SUSPICIOUS)' 기사는 최신 정정 보도 교차 검증을 위해 실시간 재분석합니다.
+* **SSRF 및 API 장애 대응 (Fail-Fast)**: 사설망/내부 IP 접근을 사전 차단하는 SSRF 방어 로직과 Gemini API 429(Rate Limit) 및 503(과부하) 다단계 모델 폴백(`gemini-2.5-flash` → `2.0-flash` → `2.0-flash-lite`)을 구현했습니다.
 
 ---
 
 ## 🏗️ 2. 시스템 아키텍처 및 데이터 흐름 (Architecture Flow)
 
-본 시스템은 사용자가 의심스러운 URL을 입력하는 순간부터 최종 요소별 진실/거짓 판정 및 DB 영구 저장까지 단일 파이프라인으로 처리됩니다.
+사용자가 URL을 입력하는 순간부터 본문 추출, 실시간 교차 검색, RAG 분석, 요소별 판정 및 DB 영구 저장까지 단일 파이프라인으로 처리됩니다.
 
 ```mermaid
 graph TD
-    A[사용자 의심 URL 입력] --> B[기사 본문 Crawling & DOM 노이즈 제거]
-    B --> E[핵심 검색어 추출 및 검색 쿼리 정제]
-    E --> F[실시간 웹 검색: Naver News API + DuckDuckGo Web]
-    F --> G[RAG 컨텍스트 구축: 수집된 신뢰 기사 본문 수집]
-    G --> H[Gemini 1.5/2.5 Flash API 모순율 대조 분석]
-    H --> I{모순도 및 요소별 진실성 판정}
-    I -->|모순도 0.0| J[진짜 뉴스 REAL 판정]
-    I -->|모순도 > 0.6| K[가짜 뉴스 FAKE 판정]
-    I -->|모순도 0.1~0.5| L[의심/과장 SUSPICIOUS 판정]
-    J & K & L --> M[Supabase Cloud DB 영구 보존]
-    M --> N[Zinc Dark 테마 대시보드 실시간 시각화 및 진단 리포트 출력]
+    A[사용자 의심 URL 입력] --> B[기사/SNS 본문 Crawling & SSRF 안전 검증]
+    B --> C[본문 내 인용 뉴스 링크 자동 추출 & 원본 보강]
+    C --> D[로컬 핵심 키워드 정제]
+    D --> E[하이브리드 실시간 검색: Naver News API + DuckDuckGo]
+    E --> F[RAG 컨텍스트 구축: 신뢰 기사 본문 DOM 추출]
+    F --> G[Gemini 2.5 Flash API 모순율 대조 분석]
+    G --> H{모순도 및 요소별 진실성 판정}
+    H -->|모순도 0.0| I[진짜 뉴스 REAL 판정]
+    H -->|모순도 > 0.6| J[가짜 뉴스 FAKE 판정]
+    H -->|모순도 0.1~0.5| K[의심/과장 SUSPICIOUS 판정]
+    I & J & K --> L[Supabase Cloud DB 영구 저장]
+    L --> M[Zinc 테마 대시보드 실시간 시각화 & 진단 리포트 출력]
 ```
 
 ---
 
 ## 🛡️ 3. 핵심 공학적 해결 방법 (Engineering Solutions)
 
-### 3.1. SNS 비정형 텍스트 대응 LLM Query Refiner
-* 조사와 어근이 붕괴된 인스타그램 캡션이나 커뮤니티 게시물을 검증하기 위해, LLM이 글의 핵심 맥락을 인지하여 **포털 검색에 최적화된 명사 중심의 정제된 검색 쿼리**를 생성하는 에이전트 모듈을 내장했습니다.
+### 3.1. 본문 내 인용 뉴스 자동 추출 & 원본 교차 보강 (Nested URL Crawler)
+* 커뮤니티나 SNS 글에서 뉴스 기사 일부만 캡처하거나 링크를 첨부한 경우, 정규식 패턴을 통해 **본문 내 언론사 링크를 자동 감지하고 원본 기사를 병렬 크롤링하여 RAG 대조군 최상단에 강제 보강**합니다.
 
 ### 3.2. 해외 원문 크롤링 기반 Cross-Border RAG
-* 기존 RAG 시스템이 검색 요약문(Snippet)에만 의존해 오류를 범하던 문제를 극복하기 위해, 상위 3개 교차 검증 참고 뉴스 기사의 **실제 DOM 본문 영역을 추적 크롤링(최대 1,200자)하여 컨텍스트로 삽입**합니다. 이를 통해 영어 등 다국어 원문과 한국어 번역 기사 간의 정보 왜곡을 원본 레벨에서 정확하게 대조합니다.
+* 검색 요약문(Snippet)에만 의존하는 기존 RAG의 한계를 극복하기 위해, 상위 3개 교차 검증 참고 뉴스 기사의 **실제 DOM 본문 영역을 멀티스레드로 추적 크롤링(최대 1,200자)하여 컨텍스트로 삽입**합니다. 이를 통해 다국어 번역 왜곡이나 수치 변형을 원본 레벨에서 정확하게 대조합니다.
 
 ### 3.3. 요소별 진실/거짓 판정 (Claims Breakdown)
-* 단순 "진실/거짓"이라는 이분법적 판정을 넘어, 기사 내부에서 검증 가능한 다수의 팩트 항목을 식별하고 각 항목별로 **진실(Truth) / 거짓(Fake) / 판단유보(Under Discussion)** 세부 분류와 대조 분석 근거를 요소별로 분리 표출하여 신뢰도를 크게 높였습니다.
+* 단순 "진실/거짓"이라는 이분법적 판정을 넘어, 기사 내부에서 검증 가능한 다수의 팩트 항목을 식별하고 각 항목별로 **진실(Truth) / 거짓(Fake) / 판단유보(Suspicious)** 세부 분류와 대조 근거를 카드 형태로 분리 표출합니다.
+
+### 3.4. 보안 및 회복 탄력성 (Security & Resilience)
+* **SSRF 방어**: 사설 IP(`10.0.0.0/8`, `192.168.0.0/16`, `127.0.0.1`), 클라우드 메타데이터 IP(`169.254.169.254`), localhost 등 내부망 접근 요청을 사전 필터링합니다.
+* **429 Fail-Fast & DB 오염 방지**: 외부 API 분당 할당량 초과(429) 시 불필요한 재시도를 즉시 중단하고, 임시 유보 결과가 DB에 오염 저장되지 않도록 방어합니다.
 
 ---
 
-## 🎨 4. 구현 수준 및 디자인 Aesthetics (Implementation)
+## 🎨 4. 프론트엔드 디자인 & UX (Design & Aesthetics)
 
-* **디자인 테마**: 최고급 Zinc 다크 모드 감성의 인터페이스를 구축하여 모던하고 신뢰성 높은 인상을 줍니다.
-* **실시간 탐지 흐름**: 실시간 기사 본문 크롤링, 실시간 교차 출처 검색 로드맵, 분석 에이전트 단계별 로딩 상태를 단계별 인터랙션으로 시각화하여 사용자가 공학적 판정 과정을 직관적으로 납득할 수 있게 설계했습니다.
-* **반응형 대시보드**: 기사 검증 기록(역대 검증 내역, 판정 분포 비율)을 Supabase Cloud DB와 연동하여 실시간 데이터베이스의 갱신 현황을 차트 및 목록으로 즉시 제공합니다.
+* **Apple 스타일 랜딩 뷰**: Spring-like 부드러운 float-in 진입 효과, 실시간 Top 5 티커 판정 배지(진짜/가짜/의심) 표출.
+* **독립 스크롤 뷰포트**: 대시보드 메인 영역과 정밀 진단 레포트(Slide-over Panel)가 데스크톱 뷰포트 내에서 독립적으로 스크롤되도록 설계.
+* **디자인 토큰 통일**: Zinc 기반의 일관된 다크/라이트 모드 팔레트와 Success, Error, Warning, Info, Brand 액션 색상 체계.
+* **인터랙티브 기능**:
+  - 실시간 분석 Stepper (1. 본문 수집 → 2. 교차 검색 → 3. 사실 검증)
+  - 기사별 심층 Q&A 어시스턴트
+  - AI 팩트체크 자유 대화 챗봇
+  - 익명 댓글 및 이모지 리액션(👍, 👎, 😮, 😡)
 
 ---
 
-## 📊 5. 실증적 검증 결과 및 증명 (Verification Results)
+## 📊 5. 실증적 검증 결과 (Verification Results)
 
-`run_load_test.py` 실시간 부하 테스트 검증 툴을 통해 본 작품의 공학적 유효성과 안정성을 증명했습니다.
+`run_load_test.py` 실시간 라이브 부하 테스트를 통해 검증된 성능 지표:
 
 | 평가지표 | 결과치 | 공학적 의의 |
 | :--- | :---: | :--- |
-| **API 호출 성공률** | **100.00%** | 외부 의존성(Gemini/Supabase)과의 완벽한 API 연동 및 예외 처리 |
-| **검증 정확도** | **99.73%** | RAG 기반 교차 대조와 Gemini 2.5 Flash를 결합한 가짜뉴스 식별 수준 |
-| **실시간 분석 지연 시간** | **1.5 ~ 2.5 s** | 실시간 크롤링, 검색, RAG, 생성형 요약 및 DB 저장을 포함하는 전 단계 소요 시간 |
+| **API 호출 성공률** | **100.00%** | 외부 의존성(Gemini/Supabase/Naver) 연동 및 완벽한 예외 처리 |
+| **검증 종합 정확도** | **99.73%** | RAG 기반 교차 대조와 Gemini 2.5 Flash 결합 판정 정확도 |
+| **실시간 분석 지연 시간** | **1.5 ~ 2.5 s** | 크롤링, 실시간 교차 검색, RAG LLM 추론 및 DB 저장을 포함한 전 단계 소요 시간 |
+| **캐시 응답 시간** | **< 0.2 s** | 24시간 내 동일 URL 검사 시 Supabase REST 캐시를 통한 즉시 반환 |
 
 ---
 
-## 📢 6. 대회 당일 시연 & 전시 시나리오 (Exhibition Demo Guide)
-
-본 작품은 대회 부스 및 발표장에서 관람객과 심사위원들이 직접 스마트폰이나 노트북으로 실시간 가짜뉴스를 판정해보는 인터랙티브 전시가 가능합니다.
+## 📢 6. 대회 당일 시연 & 전시 가이드 (Exhibition Demo Guide)
 
 ### 6.1. 준비 사항
-* 전시용 태블릿 또는 노트북 (프론트엔드 대시보드 화면을 띄워놓음)
-* 테스트용 검증 대상 URL 세트 준비:
-  1. **실제 정상 뉴스 URL**: 입력 시 실시간 포털 기사 대조 분석을 통해 2초 이내에 **"REAL (진짜)" 판정이 완료**되는 신속성 시연.
-  2. **가짜/조작 뉴스 URL 또는 인스타그램 루머 링크**: 입력 시 모순율 검증 결과에 따라 **"FAKE" 또는 "SUSPICIOUS" 판정**이 출력되며, 실시간 포털 검색 및 RAG 기사 대조가 로딩 맵으로 표현되는 과정 시연.
-  3. **claims_breakdown 요소별 판정 결과**: 분석 완료 후 각 쟁점 항목들이 카드 레이아웃으로 "진실", "거짓", "판단유보" 탭으로 나뉘어 세부 근거와 출처 링크가 표시되는 고도화된 기능 시연.
+* 전시용 태블릿 또는 노트북 (웹 브라우저로 대시보드 접속)
+* **원클릭 빠른 시연 예시 버튼** 제공:
+  1. **정상 뉴스 URL**: 입력 시 실시간 포털 대조를 통해 2초 이내에 **"REAL (진짜 뉴스)" 판정 완료** 시연.
+  2. **가짜/조작 의혹 기사 URL**: 입력 시 모순율과 함께 **"FAKE" 또는 "SUSPICIOUS" 판정** 및 세부 근거 출력 시연.
+  3. **Claims Breakdown**: 분석 완료 후 각 쟁점 항목들이 "진실", "거짓", "판단유보" 탭으로 세부 분석되는 화면 시연.
+  4. **AI 어시스턴트 탭**: 링크 없이 "성수대교 단차 9cm 사실인가요?" 등 자유 질문 시 실시간 웹 검색 및 팩트 답변 시연.
 
 ---
 
-## 📂 7. 개발 스택 및 폴더 구조 (Technical Stack)
+## 📂 7. 개발 스택 및 디렉토리 구조 (Technical Stack)
 
 ```
-├── backend_app.py           # FastAPI REST API 백엔드 진입점
-├── fact_checker_by_url.py   # 하이브리드 검증 핵심 파이프라인 (크롤링, RAG, LLM)
-├── naver_news_api.py        # 네이버 실시간 검색 연동 모듈
+├── backend_app.py           # FastAPI REST API 백엔드 진입점 & 캐싱/통계 라우트
+├── fact_checker_by_url.py   # RAG-LLM 팩트체크 파이프라인 (크롤링, 검색, SSRF 방어, LLM)
+├── naver_news_api.py        # 네이버 실시간 뉴스 검색 오픈 API 연동 모듈
 ├── run_load_test.py         # 실시간 API 및 DB 연동 부하 테스트 툴
-├── data/                    # 통계 학습 데이터셋 (진짜 뉴스 1,000건, 가짜 뉴스 112건)
-└── frontend/                # Vite React + Tailwind CSS 프론트엔드 소스
+├── vercel.json              # Vercel 클라우드 서버리스 배포 설정
+├── data/                    # 통계 학습 데이터셋 및 SQL 인덱스
+└── frontend/                # Vite + React + Tailwind CSS 프론트엔드
+    ├── src/
+    │   ├── Landing.jsx      # Apple 스타일 랜딩 히어로 & Top 5 티커
+    │   ├── App.jsx          # 메인 상태 관리 및 컨테이너
+    │   ├── index.css        # 디자인 토큰 및 글로벌 스타일
+    │   └── components/      # 모듈화된 UI 컴포넌트
+    │       ├── Sidebar.jsx           # 데스크톱 사이드바 & 판정 분포 스택 바
+    │       ├── HeaderMobile.jsx      # 모바일 헤더
+    │       ├── SearchSection.jsx     # URL 입력창 & 3단계 프로그레스 스텝퍼
+    │       ├── RankingsSection.jsx   # 실시간 최다 검증 & 최고 모순율 랭킹
+    │       ├── HistorySection.jsx    # 검증 히스토리 테이블
+    │       ├── DiagnosticPanel.jsx   # 정밀 진단 레포트, Claims Breakdown, Q&A, 댓글, 리액션
+    │       └── AssistantChatTab.jsx  # AI 팩트체크 자유 질문 챗봇
 ```
 
 ---
@@ -103,7 +128,7 @@ graph TD
 ## 🚀 8. 설치 및 실행 방법 (Getting Started)
 
 ### 8.1. 데이터베이스 테이블 스키마 생성
-Supabase 웹 콘솔 **SQL Editor**에 아래 DDL 스크립트를 붙여넣어 관계형 스키마 및 Cascade 제약조건을 초기화합니다.
+Supabase 웹 콘솔 **SQL Editor**에 아래 DDL 스크립트를 붙여넣어 테이블 및 외래키 제약조건을 초기화합니다.
 ```sql
 CREATE TABLE checks (
     id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
@@ -113,7 +138,7 @@ CREATE TABLE checks (
     contradiction_score REAL NOT NULL,
     nll_loss REAL,
     reason TEXT NOT NULL,
-    stage INTEGER NOT NULL,
+    stage INTEGER NOT NULL DEFAULT 1,
     claims_breakdown JSONB, -- 요소별 개별 진실/거짓 판정 데이터
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -132,6 +157,7 @@ CREATE TABLE check_comments (
     check_id BIGINT REFERENCES checks(id) ON DELETE CASCADE NOT NULL,
     author TEXT NOT NULL DEFAULT '익명',
     content TEXT NOT NULL,
+    user_token TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -163,7 +189,7 @@ SUPABASE_KEY=your-supabase-anon-or-service-role-key
 ```bash
 python -m venv .venv
 source .venv/bin/activate  # Windows: .\.venv\Scripts\activate
-pip install fastapi uvicorn requests python-dotenv beautifulsoup4 lxml
+pip install -r requirements.txt
 python backend_app.py
 ```
 

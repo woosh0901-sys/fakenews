@@ -9,10 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
-# Import our NLL RAG pipeline and credentials
+# Import our RAG pipeline and credentials
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from fact_checker_by_url import check_url_validity, GeminiRateLimitError
-from naver_news_api import SUPABASE_URL, SUPABASE_KEY
+from naver_news_api import SUPABASE_URL, SUPABASE_KEY, NAVER_CLIENT_ID
 
 # Clean SUPABASE_URL to make sure it doesn't end with /rest/v1 or /rest/v1/ (prevent path doubling)
 if SUPABASE_URL:
@@ -109,12 +109,18 @@ async def check_url(payload: CheckRequest):
         try:
             # Supabase timestamps are UTC, query using ISO UTC format
             time_limit = (datetime.utcnow() - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
-            encoded_url = urllib.parse.quote(url)
-            cache_query_url = f"{SUPABASE_URL}/rest/v1/checks?select=*,sources:check_references(*)&url=eq.{encoded_url}&created_at=gte.{time_limit}&order=created_at.desc&limit=1"
+            cache_query_url = f"{SUPABASE_URL}/rest/v1/checks"
+            cache_params = {
+                "select": "*,sources:check_references(*)",
+                "url": f"eq.{url}",
+                "created_at": f"gte.{time_limit}",
+                "order": "created_at.desc",
+                "limit": "1"
+            }
             headers = get_supabase_headers()
             
             async with httpx.AsyncClient(timeout=10.0) as client:
-                cache_resp = await client.get(cache_query_url, headers=headers)
+                cache_resp = await client.get(cache_query_url, headers=headers, params=cache_params)
                 if cache_resp.status_code == 200:
                     cache_data = cache_resp.json()
                     if cache_data and len(cache_data) > 0:
@@ -156,63 +162,66 @@ async def check_url(payload: CheckRequest):
         # Run the fact-checking pipeline in a separate thread pool to prevent event loop blocking
         result = await run_in_threadpool(check_url_validity, url)
         if not result:
-            raise HTTPException(status_code=500, detail="기사 본문 크롤링에 실패했거나 올바르지 않은 페이지입니다.")
+            raise HTTPException(status_code=500, detail="기사 본문 크롤링에 실패했거나 안전하지 않은 페이지입니다.")
             
-        # Store result in Supabase Database via REST API asynchronously.
+        # Store result in Supabase Database via REST API asynchronously (일시적 API 에러가 아닌 정상 판정일 때만 저장)
         result['id'] = None
         if SUPABASE_ENABLED:
-            try:
-                headers = get_supabase_headers()
+            if result.get("transient_error"):
+                print("[*] 일시적 API 오류(429 등)로 판정된 결과이므로 Supabase 저장을 건너뜁니다.")
+            else:
+                try:
+                    headers = get_supabase_headers()
 
-                # Insert into checks table
-                check_data = {
-                    "url": result['target_url'],
-                    "title": result['target_title'],
-                    "verdict": result['verdict'],
-                    "contradiction_score": float(result['contradiction_score']),
-                    "nll_loss": float(result['nll_loss']) if result.get('nll_loss') is not None else None,
-                    "reason": result['reason'],
-                    "stage": int(result['stage'])
-                }
-                if 'claims_breakdown' in result:
-                    check_data['claims_breakdown'] = result['claims_breakdown']
+                    # Insert into checks table
+                    check_data = {
+                        "url": result['target_url'],
+                        "title": result['target_title'],
+                        "verdict": result['verdict'],
+                        "contradiction_score": float(result['contradiction_score']),
+                        "nll_loss": float(result['nll_loss']) if result.get('nll_loss') is not None else None,
+                        "reason": result['reason'],
+                        "stage": int(result['stage'])
+                    }
+                    if 'claims_breakdown' in result:
+                        check_data['claims_breakdown'] = result['claims_breakdown']
 
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    resp = await client.post(f"{SUPABASE_URL}/rest/v1/checks", headers=headers, json=check_data)
-                    if resp.status_code != 201:
-                        # Fallback: if 'claims_breakdown' column doesn't exist yet in checks table, retry without it
-                        if 'claims_breakdown' in check_data:
-                            print("[!] Warning: 'claims_breakdown' column might be missing. Retrying insert without it...")
-                            del check_data['claims_breakdown']
-                            resp = await client.post(f"{SUPABASE_URL}/rest/v1/checks", headers=headers, json=check_data)
-                            if resp.status_code != 201:
+                    async with httpx.AsyncClient(timeout=15.0) as client:
+                        resp = await client.post(f"{SUPABASE_URL}/rest/v1/checks", headers=headers, json=check_data)
+                        if resp.status_code != 201:
+                            # Fallback: if 'claims_breakdown' column doesn't exist yet in checks table, retry without it
+                            if 'claims_breakdown' in check_data:
+                                print("[!] Warning: 'claims_breakdown' column might be missing. Retrying insert without it...")
+                                del check_data['claims_breakdown']
+                                resp = await client.post(f"{SUPABASE_URL}/rest/v1/checks", headers=headers, json=check_data)
+                                if resp.status_code != 201:
+                                    raise Exception(f"Supabase checks 저장 실패 (HTTP {resp.status_code}): {resp.text}")
+                            else:
                                 raise Exception(f"Supabase checks 저장 실패 (HTTP {resp.status_code}): {resp.text}")
-                        else:
-                            raise Exception(f"Supabase checks 저장 실패 (HTTP {resp.status_code}): {resp.text}")
 
-                    inserted_check = resp.json()[0]
-                    check_id = inserted_check['id']
+                        inserted_check = resp.json()[0]
+                        check_id = inserted_check['id']
 
-                    # Insert references if present (Stage 2)
-                    ref_data = []
-                    for s in result.get('sources', []):
-                        ref_data.append({
-                            "check_id": check_id,
-                            "title": s['title'],
-                            "link": s['link'],
-                            "description": s['description'],
-                            "pub_date": s['pubDate']
-                        })
+                        # Insert references if present
+                        ref_data = []
+                        for s in result.get('sources', []):
+                            ref_data.append({
+                                "check_id": check_id,
+                                "title": s['title'],
+                                "link": s['link'],
+                                "description": s['description'],
+                                "pub_date": s['pubDate']
+                            })
 
-                    if ref_data:
-                        resp_ref = await client.post(f"{SUPABASE_URL}/rest/v1/check_references", headers=headers, json=ref_data)
-                        if resp_ref.status_code != 201:
-                            raise Exception(f"Supabase check_references 저장 실패 (HTTP {resp_ref.status_code}): {resp_ref.text}")
+                        if ref_data:
+                            resp_ref = await client.post(f"{SUPABASE_URL}/rest/v1/check_references", headers=headers, json=ref_data)
+                            if resp_ref.status_code != 201:
+                                raise Exception(f"Supabase check_references 저장 실패 (HTTP {resp_ref.status_code}): {resp_ref.text}")
 
-                    result['id'] = check_id
-            except Exception as db_err:
-                print(f"[-] 검사 결과 저장 실패 (분석 결과는 정상 반환): {db_err}")
-                result['warning'] = f"검사는 완료되었지만 결과를 데이터베이스에 저장하지 못했습니다. (오류: {str(db_err)})"
+                        result['id'] = check_id
+                except Exception as db_err:
+                    print(f"[-] 검사 결과 저장 실패 (분석 결과는 정상 반환): {db_err}")
+                    result['warning'] = f"검사는 완료되었지만 결과를 데이터베이스에 저장하지 못했습니다. (오류: {str(db_err)})"
         else:
             result['warning'] = "서버에 Supabase 환경 변수가 설정되지 않아 검사 결과가 저장되지 않았습니다."
 
