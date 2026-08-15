@@ -30,20 +30,20 @@
 
 ```mermaid
 flowchart TD
-    A[뉴스 또는 SNS URL 입력] --> B[URL 보안 검증 및 SSRF 차단 (security_utils)]
-    B --> C[기사/SNS 본문 추출 & 인용 기사 자동 감지]
-    C --> D[명사 기반 핵심 검색어 추출]
-    D --> E[하이브리드 검색: Naver News API + DuckDuckGo]
-    E --> F[후보군 8~10개 확보]
-    F --> G[출처 분류: PRIMARY / WIRE·MAJOR / GENERAL / OTHER]
-    G --> H[are_articles_duplicated: 보도자료/송고문 중복 그룹화]
-    H --> I[Python: independent_source_count, primary_source_found, evidence_quality 확정]
-    I --> J[도메인 다양성 기반 최종 3~4개 독립 근거 선별]
-    J --> K[프롬프트 인젝션 방어 태그 격리]
-    K --> L[Gemini 2.5 Flash: 지지/반박/모순 의미 분석 및 Claims Breakdown]
-    L --> M[Python 결과 병합 & 메트릭 불변성 보장]
-    M --> N[(Supabase Cloud DB 영구 저장 - 429 오염 방지)]
-    N --> O[뉴스 에디토리얼 대시보드 실시간 시각화]
+    A["뉴스 또는 SNS URL 입력"] --> B["URL 보안 검증 및 SSRF 차단 (security_utils)"]
+    B --> C["기사/SNS 본문 추출 & 인용 기사 자동 감지"]
+    C --> D["명사 기반 핵심 검색어 추출"]
+    D --> E["하이브리드 검색: Naver News API + DuckDuckGo"]
+    E --> F["후보군 8~10개 확보"]
+    F --> G["출처 분류: PRIMARY / WIRE·MAJOR / GENERAL / OTHER"]
+    G --> H["are_articles_duplicated: 보도자료/송고문 중복 그룹화"]
+    H --> I["Python: independent_source_count, primary_source_found, evidence_quality 확정"]
+    I --> J["도메인 다양성 기반 최종 3~4개 독립 근거 선별"]
+    J --> K["프롬프트 인젝션 방어 태그 격리"]
+    K --> L["Gemini 2.5 Flash: 지지/반박/모순 의미 분석 및 Claims Breakdown"]
+    L --> M["Python 결과 병합 & 메트릭 불변성 보장"]
+    M --> N[("Supabase Cloud DB 영구 저장 - 429 오염 방지")]
+    N --> O["뉴스 에디토리얼 대시보드 실시간 시각화"]
 ```
 
 ---
