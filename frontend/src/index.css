@@ -117,13 +117,9 @@
   --shadow-xl: 0px 8px 8px -4px #0F172A1A, 0px 20px 24px -4px #0F172A24;
 }
 
+/* 오버스크롤 시 지면과 다른 색이 비치지 않도록 루트 배경을 페이지와 맞춘다 */
 html {
-  background-color: var(--color-neutral-50);
-}
-
-html.dark {
-  background-color: var(--color-neutral-950);
-  color-scheme: dark;
+  background-color: var(--color-neutral-0);
 }
 
 body {
