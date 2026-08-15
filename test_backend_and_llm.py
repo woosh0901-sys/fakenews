@@ -3,7 +3,7 @@ from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 import json
 
-from backend_app import app
+from backend_app import app, rate_limiter
 from fact_checker_by_url import (
     fact_check_article_with_sources,
     check_url_validity
@@ -13,10 +13,12 @@ class TestBackendAndLLMIntegration(unittest.TestCase):
 
     def setUp(self):
         self.client = TestClient(app)
+        rate_limiter._requests.clear()
 
     def test_preview_endpoint(self):
         """미리보기 엔드포인트 동작 확인"""
-        with patch("fact_checker_by_url.scrape_url_content") as mock_scrape:
+        with patch("backend_app.validate_url_safe", return_value=(True, "")), \
+             patch("fact_checker_by_url.scrape_url_content") as mock_scrape:
             mock_scrape.return_value = {
                 "title": "테스트 뉴스 기사",
                 "content": "이것은 테스트용 본문 내용입니다.",
@@ -112,7 +114,8 @@ class TestBackendAndLLMIntegration(unittest.TestCase):
             ]
         }
 
-        with patch("fact_checker_by_url.scrape_url_content") as mock_scrape, \
+        with patch("fact_checker_by_url.validate_url_safe", return_value=(True, "")), \
+             patch("fact_checker_by_url.scrape_url_content") as mock_scrape, \
              patch("fact_checker_by_url.fetch_hybrid_news") as mock_fetch, \
              patch("fact_checker_by_url.call_gemini_api") as mock_gemini, \
              patch("fact_checker_by_url.GEMINI_API_KEY", "mock_key"):
