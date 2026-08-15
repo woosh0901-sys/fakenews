@@ -125,5 +125,61 @@ class TestRAGFactCheckingPipeline(unittest.TestCase):
         selected = rank_and_select_sources(candidates, max_sources=4)
         self.assertEqual(len(selected), 1)
 
+    def test_evidence_quality_calculation_logic(self):
+        """테스트 9: Python 근거 품질 지표(evidence_quality) 산출 로직 검증"""
+        from fact_checker_by_url import calculate_evidence_quality
+        
+        # 1. 0개 소스 -> 0.0
+        self.assertEqual(calculate_evidence_quality([]), 0.0)
+        
+        # 2. 단일 일반 출처 1개 (GENERAL NEWS, weight 0.70)
+        # avg_weight=0.70, indep=1/3, div=1.0, primary=0.0 -> (0.70*0.4)+(0.3333*0.3)+(1.0*0.15)+0.0 = 0.28+0.10+0.15 = 0.53
+        single_general = [{"link": "https://techm.kr/1", "source_type": "GENERAL NEWS", "source_weight": 0.70, "domain": "techm.kr"}]
+        eq_single = calculate_evidence_quality(single_general)
+        self.assertAlmostEqual(eq_single, 0.53, places=1)
+        
+        # 3. 1차 자료(PRIMARY) 포함 3개 독립 출처 (PRIMARY + 2 MAJOR NEWS)
+        # avg_weight=(1.0+0.85+0.85)/3=0.90, indep=3/3=1.0, div=3/3=1.0, primary=0.15
+        # base_score=(0.90*0.4)+(1.0*0.3)+(1.0*0.15)+0.15 = 0.36+0.30+0.15+0.15 = 0.96
+        rich_sources = [
+            {"link": "https://mofa.go.kr/1", "source_type": "PRIMARY", "source_weight": 1.0, "domain": "mofa.go.kr"},
+            {"link": "https://yna.co.kr/2", "source_type": "WIRE / MAJOR NEWS", "source_weight": 0.85, "domain": "yna.co.kr"},
+            {"link": "https://kbs.co.kr/3", "source_type": "WIRE / MAJOR NEWS", "source_weight": 0.85, "domain": "kbs.co.kr"}
+        ]
+        eq_rich = calculate_evidence_quality(rich_sources)
+        self.assertEqual(eq_rich, 0.96)
+        self.assertLessEqual(eq_rich, 1.0)
+        self.assertGreaterEqual(eq_rich, 0.0)
+
+    def test_are_articles_duplicated_function(self):
+        """테스트 10: 기사 중복/신디케이션 판별 함수(are_articles_duplicated) 검증"""
+        from fact_checker_by_url import are_articles_duplicated
+        
+        art1 = {"title": "[속보] 정부, 2026년 청년 주거 종합대책 발표"}
+        art2 = {"title": "정부, 2026년 청년 주거 종합대책 발표 (종합)"}
+        art3 = {"title": "한국은행, 기준금리 동결 결정"}
+        
+        is_dup1, sim1 = are_articles_duplicated(art1, art2)
+        self.assertTrue(is_dup1)
+        self.assertGreaterEqual(sim1, 0.75)
+        
+        is_dup2, sim2 = are_articles_duplicated(art1, art3)
+        self.assertFalse(is_dup2)
+        self.assertLess(sim2, 0.5)
+
+    def test_calculate_relevance_score_function(self):
+        """테스트 11: 검색 결과 관련성 점수 함수(calculate_relevance_score) 검증"""
+        from fact_checker_by_url import calculate_relevance_score
+        
+        target = {"title": "박세리 이사장, 부친 사문서위조 고소 관련 입장 발표"}
+        cand_relevant = {"title": "박세리 부친 사문서위조 혐의 고소... 기자회견서 눈물"}
+        cand_irrelevant = {"title": "손흥민 토트넘 프리미어리그 경기 일정 안내"}
+        
+        score_rel = calculate_relevance_score(target, cand_relevant)
+        score_irrel = calculate_relevance_score(target, cand_irrelevant)
+        
+        self.assertGreater(score_rel, score_irrel)
+        self.assertGreater(score_rel, 0.4)
+
 if __name__ == "__main__":
     unittest.main()

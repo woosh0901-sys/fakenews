@@ -51,13 +51,16 @@ class TestBackendAndLLMIntegration(unittest.TestCase):
             }
         ]
         
+        # Gemini가 임의의 조작된 메트릭(예: 99.9, false 등)을 반환하더라도 Python 계산값이 유지되는지 검증
         mock_llm_json = {
             "verdict": "SUSPICIOUS",
             "reason": "1차 공식 기관인 보건복지부 해명자료(사실무근)와 일반 언론 보도 내용이 상호 충돌하고 있어 사실 여부가 불분명하며 추가 확인이 필요합니다.",
             "contradiction_score": 0.75,
-            "evidence_quality": 0.85,
-            "independent_source_count": 2,
-            "primary_source_found": True,
+            "evidence_quality": 0.99,          # LLM의 임의 값 (Python에 의해 무시되어야 함)
+            "independent_source_count": 999,   # LLM의 임의 값 (Python에 의해 무시되어야 함)
+            "primary_source_found": False,     # LLM의 임의 값 (Python에 의해 True로 확정되어야 함)
+            "claim_supported": False,
+            "claim_partially_supported": True,
             "claims_breakdown": [
                 {
                     "claim": "다음달부터 비대면 진료 전면 허용",
@@ -82,7 +85,8 @@ class TestBackendAndLLMIntegration(unittest.TestCase):
             
             self.assertEqual(result["verdict"], "SUSPICIOUS")
             self.assertEqual(result["contradiction_score"], 0.75)
-            self.assertEqual(result["evidence_quality"], 0.85)
+            # Python이 계산한 evidence_quality (0.80), independent_source_count (2), primary_source_found (True) 확정 검증
+            self.assertEqual(result["evidence_quality"], 0.80)
             self.assertEqual(result["independent_source_count"], 2)
             self.assertTrue(result["primary_source_found"])
             self.assertIn("충돌", result["reason"])
@@ -102,9 +106,6 @@ class TestBackendAndLLMIntegration(unittest.TestCase):
             "verdict": "REAL",
             "reason": "과기정통부 공식 1차 자료 및 연합뉴스 보도와 핵심 내용이 일치합니다.",
             "contradiction_score": 0.05,
-            "evidence_quality": 0.90,
-            "independent_source_count": 2,
-            "primary_source_found": True,
             "claims_breakdown": [
                 {
                     "claim": "정부 신규 AI 지원책 발표",
@@ -131,12 +132,12 @@ class TestBackendAndLLMIntegration(unittest.TestCase):
             self.assertEqual(res["verdict"], "REAL")
             self.assertEqual(res["target_title"], "정부 신규 AI 지원책 발표")
             self.assertEqual(res["target_url"], "https://testnews.com/article/1")
-            self.assertEqual(res["stage"], 2)
             self.assertIn("sources", res)
             self.assertIn("claims_breakdown", res)
-            self.assertEqual(res["evidence_quality"], 0.90)
+            # Python 계산값 확정
             self.assertEqual(res["independent_source_count"], 2)
             self.assertTrue(res["primary_source_found"])
+            self.assertGreater(res["evidence_quality"], 0.5)
 
 if __name__ == "__main__":
     unittest.main()

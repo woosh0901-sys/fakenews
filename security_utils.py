@@ -199,7 +199,9 @@ def sanitize_text(text: str, max_length: int = 1000) -> str:
 
 def sanitize_gemini_output(res: dict, sources_count: int = 0) -> dict:
     """
-    Gemini LLM이 반환한 JSON의 각 필드 타입과 값 범위를 엄격하게 검증하여 Fallback 및 정규화를 적용합니다.
+    Gemini LLM이 반환한 의미 분석 JSON의 각 필드 타입과 값 범위를 엄격하게 검증하여 정규화합니다.
+    주의: independent_source_count, primary_source_found, evidence_quality 등 객관적 계산값은
+    Python 파이프라인(fact_checker_by_url.py)에서 최종 확정합니다.
     """
     if not isinstance(res, dict):
         return {
@@ -209,6 +211,8 @@ def sanitize_gemini_output(res: dict, sources_count: int = 0) -> dict:
             "evidence_quality": 0.0,
             "independent_source_count": 0,
             "primary_source_found": False,
+            "claim_supported": False,
+            "claim_partially_supported": False,
             "claims_breakdown": []
         }
 
@@ -224,29 +228,16 @@ def sanitize_gemini_output(res: dict, sources_count: int = 0) -> dict:
     except (ValueError, TypeError):
         contradiction_score = 0.5
 
-    # 3. evidence_quality 검증 (0.0 ~ 1.0)
-    try:
-        evidence_quality = float(res.get("evidence_quality", 0.5))
-        evidence_quality = max(0.0, min(1.0, round(evidence_quality, 4)))
-    except (ValueError, TypeError):
-        evidence_quality = round(sources_count * 0.25, 2) if sources_count else 0.0
-
-    # 4. independent_source_count 검증 (정수 >= 0)
-    try:
-        independent_source_count = int(res.get("independent_source_count", sources_count))
-        independent_source_count = max(0, min(50, independent_source_count))
-    except (ValueError, TypeError):
-        independent_source_count = sources_count
-
-    # 5. primary_source_found 검증 (boolean)
-    primary_source_found = bool(res.get("primary_source_found", False))
-
-    # 6. reason 검증 (문자열 길이 제한)
+    # 3. reason 검증 (문자열 길이 제한 및 살균)
     reason = sanitize_text(str(res.get("reason", "")), max_length=2000)
     if not reason:
         reason = "교차 검증 분석 결과입니다."
 
-    # 7. claims_breakdown 검증 (배열 및 요소 검증)
+    # 4. claim_supported / claim_partially_supported 검증 (boolean)
+    claim_supported = bool(res.get("claim_supported", verdict == "REAL"))
+    claim_partially_supported = bool(res.get("claim_partially_supported", False))
+
+    # 5. claims_breakdown 검증 (배열 및 요소 검증)
     raw_claims = res.get("claims_breakdown", [])
     valid_claims = []
     if isinstance(raw_claims, list):
@@ -261,6 +252,21 @@ def sanitize_gemini_output(res: dict, sources_count: int = 0) -> dict:
                     "explanation": sanitize_text(str(c.get("explanation", "")), max_length=500)
                 })
 
+    # 6. 객관적 통계 지표 (Python에서 덮어쓰기 전 기본 안전값 설정)
+    try:
+        evidence_quality = float(res.get("evidence_quality", 0.0))
+        evidence_quality = max(0.0, min(1.0, round(evidence_quality, 4)))
+    except (ValueError, TypeError):
+        evidence_quality = 0.0
+
+    try:
+        independent_source_count = int(res.get("independent_source_count", sources_count))
+        independent_source_count = max(0, min(50, independent_source_count))
+    except (ValueError, TypeError):
+        independent_source_count = sources_count
+
+    primary_source_found = bool(res.get("primary_source_found", False))
+
     return {
         "verdict": verdict,
         "reason": reason,
@@ -268,5 +274,7 @@ def sanitize_gemini_output(res: dict, sources_count: int = 0) -> dict:
         "evidence_quality": evidence_quality,
         "independent_source_count": independent_source_count,
         "primary_source_found": primary_source_found,
+        "claim_supported": claim_supported,
+        "claim_partially_supported": claim_partially_supported,
         "claims_breakdown": valid_claims
     }
