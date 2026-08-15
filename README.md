@@ -1,7 +1,7 @@
 # 🛡️ [공학경진대회 출품작] Fake News Defender
 > **실시간 웹 RAG & Gemini LLM 기반 지능형 가짜뉴스 탐지 및 요소별(Claims) 팩트체크 시스템**
 >
-> 본 작품은 가짜뉴스의 사회적 전파 속도를 차단하기 위해 **실시간 웹/포털 검색(Naver News & DuckDuckGo)**과 **Gemini 2.5 Flash LLM**을 결합한 실시간 지능형 팩트체크 솔루션입니다. 기사·SNS·커뮤니티 루머의 사실 관계를 원본 레벨에서 교차 대조하고, 기사 내 세부 주장별 진실/거짓 분류(Claims Breakdown), 1차 공식 자료 우선순위 선별, 독립 근거 수 및 근거 품질 지표를 제공합니다.
+> 본 작품은 가짜뉴스의 사회적 전파 속도를 차단하기 위해 **실시간 웹/포털 검색(Naver News & DuckDuckGo)**과 **Gemini 3.5 Flash-Lite LLM**을 결합한 실시간 지능형 팩트체크 솔루션입니다. 기사·SNS·커뮤니티 루머의 사실 관계를 원본 레벨에서 교차 대조하고, 기사 내 세부 주장별 진실/거짓 분류(Claims Breakdown), 1차 공식 자료 우선순위 선별, 독립 근거 수 및 근거 품질 지표를 제공합니다.
 
 ---
 
@@ -23,31 +23,33 @@
 * **상위 후보 사전 병렬 크롤링 & 네트워크 캐싱**: 검색된 상위 후보군(최대 6개)의 본문을 병렬로 사전 크롤링하여 중복 판별 및 LLM 대조에 재사용함으로써 중복 요청을 원천 차단합니다.
 * **1차 공식 자료(PRIMARY) 우선순위**: 정부기관(`.go.kr`), 법원, 통계청, 선관위, 전자공시(DART) 등 1차 공식 출처를 2차 언론 기사보다 최우선 대조군으로 배정하며 `primary_source_found`를 Python에서 확정합니다.
 * **지능형 근거 품질 지표 (`calculate_evidence_quality`)**: 출처 가중치 평균(40%) + 독립 출처 수 비율(30%) + 도메인 다양성(15%) + 1차 공식 자료 보너스(15%)를 결합한 0.0~1.0 근거 품질 척도를 산출합니다.
-* **Gemini 의미 분석 엔진**: LLM은 통계 계산이 아닌, 참고자료가 주장을 실제로 지지/반박하는지, 자료 간 상호 충돌이 있는지, Claims Breakdown 세부 요소가 진실/거짓인지 자연어 의미 분석에 집중합니다.
+* **Gemini 3.5 Flash-Lite 의미 분석 엔진**: LLM은 통계 계산이 아닌, 참고자료가 주장을 실제로 지지/반박하는지, 자료 간 상호 충돌이 있는지, Claims Breakdown 세부 요소가 진실/거짓인지 자연어 의미 분석에 집중합니다.
 * **엔터프라이즈급 보안 아키텍처**: DNS Resolution 기반 SSRF 방어, IP 슬라이딩 윈도우 Rate Limiting, 외부 텍스트 격리 태그(`<UNTRUSTED_...>`) 완비.
 * **뉴스 에디토리얼 대시보드 UI**: 상단 마스트헤드 롤링 티커, 기사 스캔 애니메이션, 최상단 정밀 레포트, 우측 고정 랭킹 레일, 판정별 히스토리 필터링 지원.
 
 ---
 
-## 🏗️ 2. 시스템 아키텍처 및 역할 분담 (Architecture Flow)
+## 🏗️ 2. 시스템 아키텍처 및 파이프라인 (Architecture Flow)
 
 ```mermaid
 flowchart TD
-    A["뉴스 또는 SNS URL 입력"] --> B["URL 보안 검증 및 SSRF 차단 (security_utils)"]
-    B --> C["기사/SNS 본문 추출 & 인용 기사 자동 감지"]
-    C --> D["명사 기반 핵심 검색어 추출"]
-    D --> E["하이브리드 검색: Naver News API + DuckDuckGo"]
-    E --> F["후보군 8~10개 확보 및 1차 관련성 점수 부여"]
-    F --> G["상위 후보군 본문 사전 병렬 크롤링"]
-    G --> H["are_articles_duplicated: 제목+본문 유사도 및 대립 방향성 검증"]
-    H --> I["출처 분류: PRIMARY / WIRE·MAJOR / GENERAL / OTHER"]
-    I --> J["Python: independent_source_count, primary_source_found, evidence_quality 확정"]
-    J --> K["도메인 다양성 기반 최종 3~4개 독립 근거 선별"]
-    K --> L["프롬프트 인젝션 방어 태그 격리"]
-    L --> M["Gemini 2.5 Flash: 지지/반박/모순 의미 분석 및 Claims Breakdown"]
-    M --> N["Python 결과 병합 & 메트릭 불변성 보장"]
-    N --> O[("Supabase Cloud DB 영구 저장 - 429 오염 방지")]
-    O --> P["뉴스 에디토리얼 대시보드 실시간 시각화"]
+    subgraph Stage1["1. 수집 & 보안 검증"]
+        A["뉴스/SNS URL 입력"] --> B["SSRF 차단 & 본문 추출"]
+        B --> C["핵심 키워드 추출"]
+    end
+
+    subgraph Stage2["2. RAG 검색 & Python 독립 근거 선별"]
+        C --> D["하이브리드 검색 (Naver News + DDG)"]
+        D --> E["상위 후보군 본문 병렬 크롤링"]
+        E --> F["제목+본문 유사도 & 대립 방향성 검증"]
+        F --> G["Python 지표 확정 (출처수·1차자료·근거품질)"]
+    end
+
+    subgraph Stage3["3. LLM 심층 분석 & 대시보드 표출"]
+        G --> H["Gemini 3.5 Flash-Lite (지지·반박·모순 의미 분석 & Claims)"]
+        H --> I["Python 계산값 결합 & DB 저장"]
+        I --> J["뉴스 에디토리얼 대시보드 실시간 표출"]
+    end
 ```
 
 ---
