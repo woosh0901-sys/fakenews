@@ -231,5 +231,72 @@ class TestRAGFactCheckingPipeline(unittest.TestCase):
         self.assertGreater(score_rel, score_irrel)
         self.assertGreater(score_rel, 0.4)
 
+    def test_body_crawling_re_evaluation_and_re_ranking(self):
+        """테스트 12: 본문 크롤링 후 관련성(Relevance) 재계산 및 우선순위(Priority) 재정렬 검증"""
+        from fact_checker_by_url import rank_and_select_sources, calculate_relevance_score
+        
+        target = {
+            "title": "정부, 2026년 청년 공공임대 10만호 특별 공급 대책 확정",
+            "content": "국토교통부는 오늘 청년 및 신혼부부를 위해 수도권 내 공공임대 주택 10만 가구를 특별 공급하는 세부 종합대책을 발표했습니다."
+        }
+        
+        # 1. 초기 메타데이터(제목)만으로는 관련성이 낮아 보였으나 본문에 핵심 내용이 풍부한 기사
+        # 2. 초기 메타데이터(제목)는 낚시성이었으나 본문이 전혀 다른 기사
+        cand_rich_body = {
+            "title": "주택 정책 간담회 개최",
+            "description": "간담회 소식",
+            "link": "https://richnews.com/1",
+            "content": "국토교통부는 오늘 청년 및 신혼부부를 위해 수도권 내 공공임대 주택 10만 가구를 특별 공급하는 세부 종합대책을 발표했습니다."
+        }
+        cand_poor_body = {
+            "title": "정부 2026년 청년 공공임대 10만호 공급",
+            "description": "청년 주택 공급 속보",
+            "link": "https://poornews.com/2",
+            "content": "전혀 무관한 연예계 가십 기사 본문 내용입니다. 드라마 시청률 1위 달성 축하 행사..."
+        }
+        
+        # 본문 반영 전 1차 점수
+        score_rich_meta = calculate_relevance_score(target, {"title": cand_rich_body["title"], "description": cand_rich_body["description"]})
+        score_poor_meta = calculate_relevance_score(target, {"title": cand_poor_body["title"], "description": cand_poor_body["description"]})
+        
+        # 본문 반영 후 2차 점수
+        score_rich_body = calculate_relevance_score(target, cand_rich_body)
+        score_poor_body = calculate_relevance_score(target, cand_poor_body)
+        
+        # 본문 확보 후 rich 기사는 점수가 대폭 상승하고 poor 기사는 하락해야 함
+        self.assertGreater(score_rich_body, score_rich_meta)
+        self.assertLess(score_poor_body, score_poor_meta)
+        
+        # rank_and_select_sources 실행 시 본문 재평가로 rich_body 기사가 poor_body 기사보다 상위 랭크되어야 함
+        selected = rank_and_select_sources(
+            [cand_poor_body, cand_rich_body],
+            max_sources=2,
+            target_title=target["title"],
+            target_content=target["content"],
+            crawl_candidate_bodies=False  # 이미 content가 포함된 dict
+        )
+        self.assertEqual(selected[0]["link"], "https://richnews.com/1")
+
+    def test_body_crawling_failure_fallback(self):
+        """테스트 13: 본문 크롤링 실패/부재 시 기존 메타데이터 점수 유지 및 파이프라인 정상 완료 검증"""
+        from fact_checker_by_url import rank_and_select_sources
+        
+        target = {"title": "인공지능 윤리 가이드라인 발표", "content": "과기정통부 발표"}
+        candidates = [
+            {"title": "인공지능 윤리 가이드라인 발표 및 세부 해설", "link": "https://news.com/ai", "description": "과기정통부 인공지능 윤리 기준 마련"}
+        ]
+        
+        # 크롤링 실패(content 없음) 상황에서도 예외 없이 메타데이터 기반으로 선별 완료
+        selected = rank_and_select_sources(
+            candidates,
+            max_sources=2,
+            target_title=target["title"],
+            target_content=target["content"],
+            crawl_candidate_bodies=False
+        )
+        self.assertEqual(len(selected), 1)
+        self.assertIn("relevance_score", selected[0])
+        self.assertGreater(selected[0]["priority_score"], 0.4)
+
 if __name__ == "__main__":
     unittest.main()

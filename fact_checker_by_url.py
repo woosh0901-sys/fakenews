@@ -423,7 +423,7 @@ def calculate_relevance_score(target_article, candidate_source) -> float:
     고려 요소:
     1. 제목 텍스트 유사도 (Title similarity)
     2. 핵심 단어/명사 겹침율 (Keyword overlap ratio)
-    3. 본문/설명 내 핵심 키워드 출현 여부
+    3. 본문/설명 내 핵심 키워드 출현 여부 및 본문 유사도 (Content similarity)
     """
     if isinstance(target_article, dict):
         target_title = target_article.get("title", "")
@@ -448,15 +448,23 @@ def calculate_relevance_score(target_article, candidate_source) -> float:
     t_sim = text_similarity(target_title, cand_title) if (target_title and cand_title) else 0.0
 
     # 2. 키워드 일치도 (2글자 이상 단어 추출)
-    target_words = set(re.findall(r'[가-힣a-zA-Z0-9]{2,}', target_title + " " + target_body[:200]))
+    target_words = set(re.findall(r'[가-힣a-zA-Z0-9]{2,}', target_title + " " + target_body[:400]))
     if target_words:
-        cand_combined = cand_title + " " + cand_desc + " " + cand_content[:300]
+        cand_combined = cand_title + " " + cand_desc + " " + cand_content[:600]
         overlap_count = sum(1 for w in target_words if w in cand_combined)
         keyword_score = min(1.0, overlap_count / min(len(target_words), 5))
     else:
         keyword_score = 0.5
 
-    score = (keyword_score * 0.55) + (t_sim * 0.45)
+    # 3. 본문이 존재하는 경우 본문 유사도(content_similarity) 추가 결합
+    if target_body and cand_content:
+        c_sim = content_similarity(target_body, cand_content)
+        # 키워드 일치(40%) + 제목 유사도(30%) + 본문 유사도(30%)
+        score = (keyword_score * 0.40) + (t_sim * 0.30) + (c_sim * 0.30)
+    else:
+        # 본문이 없는 경우: 키워드 일치(55%) + 제목 유사도(45%)
+        score = (keyword_score * 0.55) + (t_sim * 0.45)
+
     return max(0.0, min(1.0, round(score, 2)))
 
 def calculate_evidence_quality(sources: list) -> float:
@@ -503,10 +511,12 @@ def rank_and_select_sources(candidate_sources, max_sources=4, target_title="", t
     """
     수집된 검색 후보 자료(8~10개)를 다각도로 평가하여,
     1) 출처 유형 (PRIMARY > WIRE/MAJOR > GENERAL)
-    2) 상위 후보 본문 사전 크롤링 및 제목+본문 융합 유사도 기반 중복/재전재 그룹화
-    3) 도메인 다양성 (동일 언론사 독점 방지)
-    4) 관련성 평가 (calculate_relevance_score)
-    를 거쳐 최종 3~4개의 독립적이고 신뢰도 높은 근거를 선별합니다.
+    2) 1차 메타데이터 기반 relevance & priority score 계산 및 상위 후보 선별
+    3) 상위 후보군 본문 사전 병렬 크롤링
+    4) 본문 기반 2차 relevance & priority score 재계산 (Re-scoring)
+    5) priority_score 기준 재정렬 (Re-ranking)
+    6) 제목+본문 융합 유사도 및 대립 방향성 검증 기반 중복 그룹화
+    7) 도메인 다양성을 고려하여 최종 3~4개의 독립적이고 신뢰도 높은 근거 선별
     """
     if not candidate_sources:
         return []
@@ -536,7 +546,7 @@ def rank_and_select_sources(candidate_sources, max_sources=4, target_title="", t
         seen_urls.add(url)
         valid_candidates.append(s)
 
-    # 2. 1차 메타데이터 부착 (도메인, 출처유형, 가중치, 관련성 우선순위 점수)
+    # 2. 1차 메타데이터 부착 (도메인, 출처유형, 가중치, 1차 관련성 점수 및 우선순위 점수)
     target_obj = {"title": target_title, "content": target_content}
     scored_candidates = []
     for s in valid_candidates:
@@ -545,21 +555,22 @@ def rank_and_select_sources(candidate_sources, max_sources=4, target_title="", t
         source_type = classify_source(url)
         weight = get_source_weight(url)
         
-        # 검색 대상 제목/본문과의 관련성 (calculate_relevance_score 활용)
-        relevance = calculate_relevance_score(target_obj, s)
+        # 1차 메타데이터 기반 relevance score
+        rel_1st = calculate_relevance_score(target_obj, s)
             
-        priority_score = (weight * 0.6) + (relevance * 0.4)
+        p_1st = (weight * 0.6) + (rel_1st * 0.4)
         if source_type == "PRIMARY":
-            priority_score += 0.5  # 1차 공식 자료 최우선 가산점
+            p_1st += 0.5  # 1차 공식 자료 최우선 가산점
 
         scored_item = dict(s)
         scored_item["domain"] = domain
         scored_item["source_type"] = source_type
         scored_item["source_weight"] = weight
-        scored_item["priority_score"] = priority_score
+        scored_item["relevance_score"] = rel_1st
+        scored_item["priority_score"] = round(p_1st, 3)
         scored_candidates.append(scored_item)
 
-    # 우선순위 점수 기준 내림차순 정렬
+    # 1차 우선순위 점수 기준 내림차순 정렬
     scored_candidates.sort(key=lambda x: x["priority_score"], reverse=True)
 
     # 3. 상위 후보군(최대 6개)에 대해 본문 사전 병렬 크롤링 수행 (네트워크 비용 최소화)
@@ -592,7 +603,32 @@ def rank_and_select_sources(candidate_sources, max_sources=4, target_title="", t
                     except Exception:
                         pass
 
-    # 4. 기사 중복 판단 및 그룹화 (제목 + 본문 융합 유사도 are_articles_duplicated 활용)
+    # 4. [핵심 개선] 본문 크롤링 결과 기반 Relevance 및 Priority Score 재계산 (Re-scoring)
+    for cand in scored_candidates:
+        old_rel = cand.get("relevance_score", 0.5)
+        weight = cand.get("source_weight", 0.5)
+        source_type = cand.get("source_type", "OTHER")
+
+        if cand.get("content"):
+            # 본문이 있는 경우: 본문 기반 relevance 재계산
+            new_rel = calculate_relevance_score(target_obj, cand)
+            cand["relevance_score"] = new_rel
+            
+            # 본문 기반 priority_score 재계산 (동일한 scoring 공식 적용)
+            new_priority = (weight * 0.6) + (new_rel * 0.4)
+            if source_type == "PRIMARY":
+                new_priority += 0.5
+            cand["priority_score"] = round(new_priority, 3)
+
+            print(f"    [RELEVANCE] Title: {cand.get('title', '')[:30]}... | Content: available | Old Score: {old_rel:.2f} -> New Score: {new_rel:.2f} | Priority: {cand['priority_score']:.2f}")
+        else:
+            # 본문 크롤링 실패 또는 본문 부재 시 기존 metadata 기반 점수 유지
+            print(f"    [RELEVANCE] Title: {cand.get('title', '')[:30]}... | Content: not available | Maintained Score: {cand.get('priority_score', 0.5):.2f}")
+
+    # 5. 재계산된 priority_score 기준 재정렬 (Re-ranking)
+    scored_candidates.sort(key=lambda x: x.get("priority_score", 0), reverse=True)
+
+    # 6. 기사 중복 판단 및 그룹화 (제목 + 본문 융합 유사도 are_articles_duplicated 활용)
     deduped_groups = []
     for candidate in scored_candidates:
         matched_group = False
@@ -602,6 +638,7 @@ def rank_and_select_sources(candidate_sources, max_sources=4, target_title="", t
             if is_dup:
                 group["members"].append(candidate)
                 matched_group = True
+                print(f"    [DUPLICATE] Rep: '{rep.get('title', '')[:25]}...' <-> Cand: '{candidate.get('title', '')[:25]}...' | Reason: {reason} | Similarity: {sim_score:.2f}")
                 break
         if not matched_group:
             deduped_groups.append({
@@ -611,11 +648,11 @@ def rank_and_select_sources(candidate_sources, max_sources=4, target_title="", t
 
     print(f"    [평가] 후보 자료 {len(candidate_sources)}개 -> 유효 {len(scored_candidates)}개 -> 독립 그룹 {len(deduped_groups)}개 식별")
 
-    # 5. 도메인 다양성을 고려한 최종 선별
+    # 7. 도메인 다양성을 고려한 최종 선별
     selected_sources = []
     used_domains = set()
 
-    # 5-1. PRIMARY 1차 출처 먼저 선별
+    # 7-1. PRIMARY 1차 출처 먼저 선별
     for group in deduped_groups:
         rep = group["representative"]
         if rep["source_type"] == "PRIMARY" and len(selected_sources) < max_sources:
@@ -624,7 +661,7 @@ def rank_and_select_sources(candidate_sources, max_sources=4, target_title="", t
             selected_sources.append(rep_copy)
             used_domains.add(rep["domain"])
 
-    # 5-2. 주요 독립 언론 및 기타 출처 선별 (도메인 다양성 적용)
+    # 7-2. 주요 독립 언론 및 기타 출처 선별 (도메인 다양성 적용)
     for group in deduped_groups:
         if len(selected_sources) >= max_sources:
             break
@@ -639,7 +676,7 @@ def rank_and_select_sources(candidate_sources, max_sources=4, target_title="", t
         selected_sources.append(rep_copy)
         used_domains.add(rep["domain"])
 
-    # 5-3. 만약 도메인 중복 회피로 인해 max_sources보다 적게 뽑혔다면, 남은 것 중 점수순으로 보충
+    # 7-3. 만약 도메인 중복 회피로 인해 max_sources보다 적게 뽑혔다면, 남은 것 중 점수순으로 보충
     if len(selected_sources) < min(max_sources, len(deduped_groups)):
         for group in deduped_groups:
             if len(selected_sources) >= max_sources:
