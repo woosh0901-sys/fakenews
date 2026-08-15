@@ -1,255 +1,197 @@
 # Fake News Defender
 
-뉴스 기사와 SNS 게시물의 주장을 실시간 검색 자료와 비교하는 AI 팩트체크 서비스입니다. 사용자는 뉴스, Instagram, X(트위터) 링크를 입력하고 `REAL`, `FAKE`, `SUSPICIOUS` 판정과 근거를 확인할 수 있습니다.
+뉴스 기사와 SNS 게시물의 주장을 실시간 검색 자료와 비교·대조하여 판정하는 **RAG(검색 증강 생성) 기반 AI 팩트체크 시스템**입니다. 사용자는 뉴스, Instagram, X(트위터) 링크를 입력하고 `REAL`, `FAKE`, `SUSPICIOUS` 판정과 다각도의 독립적 근거를 확인할 수 있습니다.
 
-이 문서는 현재 저장소의 구현을 기준으로 작성되었습니다.
+---
 
-## 주요 기능
+## 🌟 주요 기능 및 파이프라인 특징
 
-- 뉴스 기사 URL의 제목과 본문 추출
-- Instagram 및 X(트위터) 게시물 링크 처리
-- 네이버 뉴스 API와 DuckDuckGo HTML 검색을 결합한 실시간 참고 자료 수집
-- 참고 기사 본문을 추가로 크롤링해 Gemini와 교차 검증
-- `REAL`, `FAKE`, `SUSPICIOUS` 판정
-- 기사 전체 판정 근거와 주장별 세부 판정(`claims_breakdown`) 표시
-- 교차 검증 출처와 원문 링크 제공
-- Supabase 기반 검증 히스토리, 통계, 댓글 저장
-- 최근 검증 결과 캐시와 가장 많이 검증된 기사 목록
-- Vite 개발 서버와 Vercel 서버리스 배포 지원
+### 1. 지능형 RAG & 출처 선별 파이프라인 (독립 근거 평가)
+- **후보군 확대 및 하이브리드 수집**: 네이버 뉴스 API와 DuckDuckGo 실시간 웹 검색을 결합하여 8~10개의 후보 자료 풀을 확보합니다.
+- **"3 articles != 3 independent evidence" 원칙**: 여러 언론사가 동일한 보도자료나 단일 인터뷰를 받아쓴 경우, 텍스트 유사도(`SequenceMatcher`) 분석을 통해 하나의 원출처 그룹으로 묶고 대표 1건만 선별하여 근거 과다 계상을 방지합니다.
+- **1차 공식 자료(PRIMARY) 우선순위**: 정부기관(`.go.kr`), 법원, 통계청, 선관위 등 1차 공식 출처가 검색되면 2차 언론 기사보다 최우선 대조군으로 배정합니다.
+- **도메인 다양성 확보**: 특정 언론사나 동일 도메인이 검색 결과를 독점하지 않도록 다양한 언론사의 기사를 고루 선별합니다.
+- **고도화된 Gemini 심층 대조**:
+  - `contradiction_score`: 모순도/불일치 정도 (0.0=완전일치 ~ 1.0=완전모순)
+  - `evidence_quality`: 확보된 근거의 완성도 및 독립성 품질 척도
+  - `independent_source_count`: 서로 다른 원출처를 가진 실제 독립 근거 개수
+  - `claims_breakdown`: 문장/주장별 진위 판정 및 세부 해설
 
-## 동작 흐름
+### 2. 엔터프라이즈급 보안 아키텍처 (Security Hardening)
+- **SSRF (Server-Side Request Forgery) 완벽 방어**:
+  - 사용자 입력 URL의 DNS Resolution을 수행하여 실제 IP가 사설망(`10.0.0.0/8`, `192.168.0.0/16`, `172.16.0.0/12`), 루프백(`127.0.0.0/8`, `localhost`, `::1`), 클라우드 메타데이터(`169.254.169.254`)인 경우 원천 차단 (DNS Rebinding 방어).
+  - Redirect 시 매 Hop마다 대상 IP를 재검증하여 Redirect 기반 SSRF 차단.
+  - 스트리밍 방식으로 최대 응답 크기(5MB) 및 Connect/Read 타임아웃 강제 적용.
+- **IP 기반 슬라이딩 윈도우 Rate Limiting**:
+  - `/api/check`: 1분당 최대 5회
+  - `/api/preview`: 1분당 최대 10회
+  - 댓글 작성: 1분당 최대 10회
+- **프롬프트 인젝션(Prompt Injection) 격리**:
+  - 외부 기사 및 참고자료를 `<UNTRUSTED_TARGET_ARTICLE>`, `<UNTRUSTED_REFERENCE_SOURCE>` 태그로 격리하고 LLM에 비신뢰 데이터 지침 부여.
+- **출력 스키마 살균 및 안전한 폴백**:
+  - LLM 응답 필드 및 범위를 서버에서 재검증(`sanitize_gemini_output`).
+- **보안 헤더 및 CORS 제한**:
+  - `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy` 적용 및 운영환경 CORS 화이트리스트 적용.
+- **디버그 엔드포인트 제거**:
+  - 환경변수 및 키 유출 방지를 위해 `/api/debug/*` 제거 및 운영환경 API 문서 비노출.
+
+---
+
+## 🔄 시스템 동작 흐름
 
 ```mermaid
 flowchart TD
-    A[뉴스 또는 SNS URL 입력] --> B[본문 및 메타데이터 추출]
-    B --> C[핵심 키워드 추출]
-    C --> D[네이버 뉴스 검색]
-    C --> E[DuckDuckGo 웹 검색]
-    D --> F[참고 자료 병합 및 중복 제거]
-    E --> F
-    F --> G[참고 기사 최대 3건 본문 크롤링]
-    G --> H[Gemini 사실관계 교차 검증]
-    H --> I[REAL / FAKE / SUSPICIOUS 결과 생성]
-    I --> J[주장별 근거와 출처 반환]
-    J --> K[(Supabase 선택 저장)]
+    A[뉴스 또는 SNS URL 입력] --> B[URL 보안 검증 및 SSRF 차단]
+    B --> C[기사/SNS 본문 추출]
+    C --> D[명사 기반 핵심 검색어 추출]
+    D --> E[네이버 뉴스 검색 & DuckDuckGo 검색]
+    E --> F[후보군 8~10개 확보]
+    F --> G[유사도 분석 & 동일 보도자료 그룹화]
+    G --> H[1차자료 우선 배정 & 도메인 다양성 선별]
+    H --> I[최종 3~4개 독립 근거 본문 병렬 크롤링]
+    I --> J[프롬프트 인젝션 방어 태그 격리]
+    J --> K[Gemini 사실관계 심층 교차 검증]
+    K --> L[출력 스키마 검증 & 지표 정규화]
+    L --> M[REAL / FAKE / SUSPICIOUS 및 상세 근거 반환]
+    M --> N[(Supabase 선택적 비동기 저장)]
 ```
 
-검증 요청은 다음과 같이 처리됩니다.
+---
 
-1. URL 형식을 확인하고 기사 또는 SNS 본문을 추출합니다.
-2. 본문에서 검색용 핵심 키워드를 만들어 네이버와 DuckDuckGo에서 참고 자료를 찾습니다.
-3. 병합된 참고 자료 중 최대 3건의 실제 본문을 가져옵니다.
-4. Gemini가 검증 대상과 참고 자료를 비교해 판정 근거와 주장별 결과를 생성합니다.
-5. Supabase가 설정되어 있으면 결과와 참고 출처를 저장합니다. 설정되지 않은 경우에도 분석 결과는 반환되지만 히스토리와 통계는 비어 있습니다.
+## 📊 판정 기준 (Verdict)
 
-## 판정 결과
+| 판정 (Verdict) | 판정 기준 및 의미 |
+| :--- | :--- |
+| **`REAL`** | 신뢰할 수 있는 독립된 1차 자료 또는 복수의 독립된 주요 출처와 핵심 사실(수치, 인물, 발언, 사건 여부)이 명백히 일치하는 경우 |
+| **`FAKE`** | 공신력 있는 근거에 의해 핵심 사실이 날조·조작되었거나 명백한 허위 왜곡임이 입증된 경우 |
+| **`SUSPICIOUS`** | 근거가 부족하여 사실 확인이 어렵거나, 1차 자료와 보도가 충돌하거나, 과장·루머가 섞여 있어 단정하기 어려운 경우 (*검색 결과가 없거나 부족해도 FAKE로 단정하지 않고 SUSPICIOUS 부여*) |
 
-| 값 | 의미 |
-| --- | --- |
-| `REAL` | 참고 자료와 주요 사실관계가 대체로 일치하는 기사 |
-| `FAKE` | 핵심 사실, 수치, 발언 또는 사건이 명백히 왜곡되거나 조작된 경우 |
-| `SUSPICIOUS` | 과장 또는 미확인 주장이 포함되어 추가 확인이 필요한 경우 |
+---
 
-분석 결과에는 전체 `reason`, 주장별 `claims_breakdown`, 교차 검증 `sources`가 포함됩니다. 모순율은 화면에서 퍼센트로 표시되며, 내부 API와 데이터베이스에는 `contradiction_score` 값으로 저장됩니다.
+## 🛠️ 기술 스택
 
-## 기술 스택
+- **Frontend**: React 19, Vite, Tailwind CSS, Axios, Lucide React
+- **Backend**: FastAPI, Pydantic, HTTPX, Uvicorn
+- **Security & Crawling**: `security_utils` (SSRF/DNS Guard, Rate Limiter), BeautifulSoup4, Requests
+- **Search**: Naver News Search API, DuckDuckGo HTML Search
+- **AI / LLM**: Google Gemini API (`gemini-2.5-flash-lite`, `gemini-2.0-flash`), Ollama Local Fallback
+- **Database**: Supabase REST API (PostgreSQL)
+- **Deployment**: Vercel Functions (Serverless) + Vite Static Build
 
-- Frontend: React 19, Vite, Tailwind CSS, Axios, Lucide React
-- Backend: FastAPI, Pydantic, HTTPX
-- Crawling: Requests, BeautifulSoup4, lxml
-- Search: Naver News Search API, DuckDuckGo HTML search
-- LLM: Google Gemini API
-- Persistence: Supabase REST API
-- Deployment: Vercel Functions + Vite static build
+---
 
-## 프로젝트 구조
+## 📂 프로젝트 구조
 
 ```text
 .
-├── api/index.py                 # Vercel에서 FastAPI 앱을 노출하는 진입점
-├── backend_app.py               # FastAPI API 서버
-├── fact_checker_by_url.py       # 크롤링, 검색, Gemini 검증 파이프라인
-├── naver_news_api.py             # 환경변수 로드 및 네이버 뉴스 API 클라이언트
+├── api/
+│   └── index.py                 # Vercel Serverless 진입점
+├── backend_app.py               # FastAPI 백엔드 서버 (Rate Limiter, CORS, 보안 헤더)
+├── fact_checker_by_url.py       # RAG 파이프라인, 출처 선별, LLM 교차 검증
+├── security_utils.py            # SSRF 방어, 안전한 HTTP 요청, 데이터 살균 모듈
+├── naver_news_api.py            # 환경변수 로드 및 네이버 뉴스 검색 API
+├── test_security.py             # SSRF, Rate Limit, 보안 헤더 등 보안 단위 테스트
+├── test_rag_pipeline.py         # 보도자료 중복제거, 1차자료 우선순위 등 RAG 단위 테스트
+├── test_backend_and_llm.py      # 백엔드 API 및 LLM 상호 모순 검증 통합 테스트
 ├── data/
-│   └── supabase_indexes.sql      # Supabase 조회 성능용 인덱스
+│   └── supabase_indexes.sql     # Supabase 조회 성능용 인덱스
 ├── frontend/
-│   ├── src/App.jsx               # 검증 결과, 히스토리, 통계, 댓글 화면
-│   ├── src/Landing.jsx           # 첫 화면과 URL 입력 화면
-│   ├── src/verdict.js            # 판정별 화면 스타일 규칙
-│   └── vite.config.js            # 로컬 `/api` 프록시 설정
-├── scripts/                      # 분석 및 부하 테스트용 보조 스크립트
-├── run_load_test.py              # API 부하 테스트 스크립트
-├── requirements.txt              # Python 의존성
-├── package.json                  # 루트 빌드 명령
-└── vercel.json                   # Vercel 빌드 및 라우팅 설정
+│   ├── src/
+│   │   ├── App.jsx              # 대시보드, 검증 결과, 히스토리, 통계, 댓글 화면
+│   │   ├── Landing.jsx          # 랜딩 페이지 및 URL 입력 화면
+│   │   └── verdict.js           # 판정별 UI 뱃지/색상 정의
+│   └── vite.config.js           # 프론트엔드 설정 및 /api 프록시
+├── requirements.txt             # Python 의존성
+└── vercel.json                  # Vercel 배포 및 라우팅 설정
 ```
 
-## 로컬 실행
+---
 
-### 1. 사전 요구 사항
+## 🚀 로컬 개발 및 실행
 
-- Python 3.10 이상
-- Node.js 18 이상
-- 선택 사항: Naver Developers 애플리케이션, Google Gemini API 키, Supabase 프로젝트
-
-### 2. Python 환경 설정
-
-프로젝트 루트에서 실행합니다.
-
+### 1. Python 가상환경 구성
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-macOS/Linux에서는 다음을 사용합니다.
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 3. 환경 변수 설정
-
-프로젝트 루트에 `.env` 파일을 만들고 필요한 값을 입력합니다.
+### 2. 환경 변수 설정 (`.env`)
+프로젝트 루트에 `.env` 파일을 생성합니다.
 
 ```ini
-# Gemini 정밀 판정에 필요
+# Gemini API Key (필수)
 GEMINI_API_KEY=your_gemini_api_key
 
-# 네이버 뉴스 검색에 필요
+# 네이버 뉴스 검색 API (선택/권장)
 NAVER_CLIENT_ID=your_naver_client_id
 NAVER_CLIENT_SECRET=your_naver_client_secret
 
-# 선택 사항. 설정하면 히스토리, 통계, 댓글을 사용할 수 있습니다.
+# Supabase 데이터베이스 (선택)
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_KEY=your_server_side_supabase_key
+SUPABASE_KEY=your_server_side_service_key
 ```
 
-`SUPABASE_KEY`는 브라우저에 노출되지 않는 서버 측 키로 설정해야 합니다. `.env` 파일은 Git에 커밋하지 마세요.
-
-### 4. Supabase 테이블 설정
-
-Supabase SQL Editor에서 아래 스키마를 실행합니다.
-
-```sql
-create table if not exists checks (
-  id bigint generated by default as identity primary key,
-  url text not null,
-  title text not null,
-  verdict text not null,
-  contradiction_score real not null,
-  nll_loss real,
-  reason text not null,
-  stage integer not null,
-  claims_breakdown jsonb,
-  created_at timestamptz default current_timestamp
-);
-
-create table if not exists check_references (
-  id bigint generated by default as identity primary key,
-  check_id bigint references checks(id) on delete cascade not null,
-  title text not null,
-  link text not null,
-  description text not null,
-  pub_date text not null
-);
-
-create table if not exists check_comments (
-  id bigint generated by default as identity primary key,
-  check_id bigint references checks(id) on delete cascade not null,
-  author text not null default '익명',
-  content text not null,
-  user_token text,
-  created_at timestamptz default current_timestamp
-);
-```
-
-테이블 생성 후 `data/supabase_indexes.sql`을 실행하면 히스토리 정렬과 통계 조회에 필요한 인덱스가 추가됩니다. 운영 환경에서는 Supabase RLS 정책과 서버 키 권한을 별도로 설정하세요.
-
-### 5. 백엔드 실행
-
-첫 번째 터미널에서 실행합니다.
-
+### 3. 백엔드 실행
 ```powershell
 python backend_app.py
 ```
+> FastAPI 서버가 `http://127.0.0.1:8000`에서 실행됩니다.
 
-FastAPI 서버는 기본적으로 `http://127.0.0.1:8000`에서 실행됩니다.
-
-### 6. 프론트엔드 실행
-
-두 번째 터미널에서 실행합니다.
-
+### 4. 프론트엔드 실행
 ```powershell
 cd frontend
 npm install
 npm run dev
 ```
+> 브라우저에서 `http://localhost:5173`으로 접속합니다.
 
-브라우저에서 `http://localhost:5173`을 엽니다. Vite가 `/api` 요청을 로컬 FastAPI 서버인 `http://127.0.0.1:8000`으로 프록시합니다.
+---
 
-## API
+## 🧪 테스트 실행
 
-모든 API 경로는 `/api` prefix를 사용합니다.
+프로젝트의 보안 및 RAG 파이프라인 무결성을 검증하기 위한 자동화 테스트를 제공합니다.
 
-| Method | Path | 설명 |
-| --- | --- | --- |
-| `POST` | `/api/preview` | 분석 화면에 표시할 기사 제목, 본문, 출처를 빠르게 추출 |
-| `POST` | `/api/check` | URL 전체 팩트체크 실행 |
-| `GET` | `/api/history` | 검증 히스토리 조회 |
-| `DELETE` | `/api/history/{check_id}` | 검증 결과 삭제 |
-| `GET` | `/api/stats` | 전체 검사 수와 판정별 통계 조회 |
-| `GET` | `/api/stats/rankings` | 많이 검증된 기사와 주요 의심 결과 조회 |
-| `GET` | `/api/history/{check_id}/comments` | 결과별 댓글 조회 |
-| `POST` | `/api/history/{check_id}/comments` | 결과에 댓글 추가 |
-| `DELETE` | `/api/history/{check_id}/comments/{comment_id}` | 본인 댓글 삭제 |
+```powershell
+# 1. 보안 기능 검증 (SSRF 방어, Rate Limit, 보안 헤더, 살균)
+python test_security.py
 
-검증 요청 본문은 다음과 같습니다.
+# 2. RAG 파이프라인 검증 (보도자료 중복 제거, 1차 자료 우선, 도메인 독점 방지 등)
+python test_rag_pipeline.py
 
-```json
-{
-  "url": "https://example.com/news/article"
-}
+# 3. 백엔드 및 LLM 통합 검증 (상호 모순 케이스, API 엔드포인트)
+python test_backend_and_llm.py
 ```
 
-개발 중 환경 확인에는 `/api/debug/env`와 `/api/debug/gemini`를 사용할 수 있습니다. 이 엔드포인트는 운영 환경에서 인증 없이 공개하지 않는 것을 권장합니다.
+---
 
-## 빌드 및 배포
+## 📡 API 명세
 
-루트에서 프론트엔드 production build를 실행합니다.
+모든 API 엔드포인트는 `/api` 접두사를 사용합니다.
 
-```bash
-npm run build
-```
+| Method | Endpoint | 설명 | Rate Limit |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/preview` | 분석 로딩 화면용 경량 제목/본문/출처 추출 | 10회 / 분 |
+| `POST` | `/api/check` | URL 전체 팩트체크 분석 실행 (캐시 지원) | 5회 / 분 |
+| `GET` | `/api/history` | 최근 검증 히스토리 조회 | 60회 / 분 |
+| `DELETE`| `/api/history/{check_id}` | 검증 기록 삭제 | 30회 / 분 |
+| `GET` | `/api/stats` | 전체 검증 수 및 통계 집계 조회 | 60회 / 분 |
+| `GET` | `/api/stats/rankings` | 최다 검증 기사 및 허위 의심 순위 | 60회 / 분 |
+| `GET` | `/api/history/{check_id}/comments` | 검증 결과별 댓글 목록 조회 | 60회 / 분 |
+| `POST` | `/api/history/{check_id}/comments` | 댓글 등록 (XSS 살균) | 10회 / 분 |
+| `DELETE`| `/api/history/{check_id}/comments/{comment_id}` | 본인 작성 댓글 삭제 | 20회 / 분 |
 
-이 명령은 `frontend` 의존성을 설치한 뒤 `frontend/dist`를 생성합니다.
+---
 
-Vercel 배포 시에는 다음 환경 변수를 Project Settings에 등록합니다.
+## ☁️ 배포 (Vercel)
 
-- `GEMINI_API_KEY`
-- `NAVER_CLIENT_ID`
-- `NAVER_CLIENT_SECRET`
-- `SUPABASE_URL`
-- `SUPABASE_KEY`
-
-`vercel.json`이 `frontend/dist`를 정적 출력으로 사용하고 `/api/*` 요청을 `api/index.py`의 FastAPI 앱으로 연결합니다. 서버리스 실행 시간은 현재 설정상 최대 60초입니다.
-
-## 문제 해결
-
-- **히스토리와 통계가 비어 있음**: `SUPABASE_URL`과 `SUPABASE_KEY`가 설정되어 있는지, 테이블과 인덱스가 생성되어 있는지 확인합니다.
-- **Gemini 판정이 `SUSPICIOUS`로 유보됨**: `GEMINI_API_KEY`가 유효한지와 API 사용량 제한을 확인합니다. 로컬에서는 Gemini 실패 시 Ollama 폴백을 시도할 수 있지만, Vercel 서버리스에서는 로컬 Ollama를 사용할 수 없습니다.
-- **참고 출처가 부족함**: 네이버 키를 확인하고, DuckDuckGo 검색이 실행 가능한 네트워크인지 확인합니다.
-- **프론트엔드에서 API 연결 실패**: FastAPI 서버가 8000 포트에서 실행 중인지 확인합니다. Vite 개발 서버는 `/api`를 8000 포트로 전달합니다.
-
-## 개발 확인 명령
-
-```bash
-# 프론트엔드 production build
-npm run build
-
-# 프론트엔드 lint
-cd frontend
-npm run lint
-```
+1. 루트 디렉터리에서 프론트엔드 빌드 테스트:
+   ```bash
+   npm run build
+   ```
+2. Vercel 대시보드의 **Project Settings > Environment Variables**에 다음 항목을 등록합니다:
+   - `GEMINI_API_KEY`
+   - `NAVER_CLIENT_ID`
+   - `NAVER_CLIENT_SECRET`
+   - `SUPABASE_URL`
+   - `SUPABASE_KEY`
