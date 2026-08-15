@@ -1,14 +1,28 @@
 import unittest
+from unittest.mock import patch
 from fact_checker_by_url import (
     get_domain,
     classify_source,
     get_source_weight,
     text_similarity,
+    content_similarity,
+    clean_content_for_comparison,
+    are_articles_duplicated,
+    calculate_relevance_score,
+    calculate_evidence_quality,
     rank_and_select_sources,
     fact_check_article_with_sources,
 )
 
 class TestRAGFactCheckingPipeline(unittest.TestCase):
+
+    def setUp(self):
+        # 단위 테스트 중 외부 라이브 URL로 실제 HTTP 통신이 발생하지 않도록 기본 목킹
+        self.scrape_patcher = patch("fact_checker_by_url.scrape_url_content", return_value={"title": "mock", "content": ""})
+        self.scrape_patcher.start()
+
+    def tearDown(self):
+        self.scrape_patcher.stop()
 
     def test_domain_extraction(self):
         """URL 도메인 추출 및 www, 모바일 등 정규화 검증"""
@@ -155,25 +169,61 @@ class TestRAGFactCheckingPipeline(unittest.TestCase):
         """테스트 10: 기사 중복/신디케이션 판별 함수(are_articles_duplicated) 검증"""
         from fact_checker_by_url import are_articles_duplicated
         
+        # 1. 제목 유사성 기반
         art1 = {"title": "[속보] 정부, 2026년 청년 주거 종합대책 발표"}
         art2 = {"title": "정부, 2026년 청년 주거 종합대책 발표 (종합)"}
         art3 = {"title": "한국은행, 기준금리 동결 결정"}
         
-        is_dup1, sim1 = are_articles_duplicated(art1, art2)
+        is_dup1, sim1, reason1 = are_articles_duplicated(art1, art2)
         self.assertTrue(is_dup1)
         self.assertGreaterEqual(sim1, 0.75)
         
-        is_dup2, sim2 = are_articles_duplicated(art1, art3)
+        is_dup2, sim2, reason2 = are_articles_duplicated(art1, art3)
         self.assertFalse(is_dup2)
         self.assertLess(sim2, 0.5)
+
+        # 2. 본문 기반 중복 (제목이 달라도 본문이 동일한 통신사 송고문 전재 기사)
+        art_synd_a = {
+            "title": "A일보: 정부 2026 주거안정 정책",
+            "content": "국토교통부는 오늘 청년 및 신혼부부를 위한 공공임대 10만호 공급을 골자로 하는 종합대책을 최종 발표했습니다. 기자 이메일 news@a.com 저작권자 무단전재 금지"
+        }
+        art_synd_b = {
+            "title": "B방송: 국토부 청년주택 10만가구 공급",
+            "content": "국토교통부는 오늘 청년 및 신혼부부를 위한 공공임대 10만호 공급을 골자로 하는 종합대책을 최종 발표했습니다. 취재기자 홍길동 저작권자 ⓒ All rights reserved"
+        }
+        is_dup_synd, sim_synd, reason_synd = are_articles_duplicated(art_synd_a, art_synd_b)
+        self.assertTrue(is_dup_synd)
+        self.assertEqual(reason_synd, "syndicated_content")
+
+        # 3. 제목은 유사하지만 본문 내용/주장 방향이 완전히 다른 기사 -> 중복으로 오판하지 않음
+        art_opposite_a = {
+            "title": "기업 A, 미국 현지 반도체 생산라인 대규모 투자 전격 결정",
+            "content": "기업 A는 오늘 이사회를 열고 미국 텍사스 신규 팹 건설에 20조원을 전액 투자하기로 결의했습니다."
+        }
+        art_opposite_b = {
+            "title": "기업 A, 미국 현지 반도체 생산라인 투자 전면 철회",
+            "content": "기업 A는 글로벌 경기 침체와 시장 불확실성으로 인해 기존에 계획했던 미국 텍사스 신규 공장 건립을 전면 취소하고 철회한다고 공시했습니다."
+        }
+        is_dup_opp, sim_opp, reason_opp = are_articles_duplicated(art_opposite_a, art_opposite_b)
+        self.assertFalse(is_dup_opp)
+        self.assertEqual(reason_opp, "similar_title_distinct_content")
 
     def test_calculate_relevance_score_function(self):
         """테스트 11: 검색 결과 관련성 점수 함수(calculate_relevance_score) 검증"""
         from fact_checker_by_url import calculate_relevance_score
         
-        target = {"title": "박세리 이사장, 부친 사문서위조 고소 관련 입장 발표"}
-        cand_relevant = {"title": "박세리 부친 사문서위조 혐의 고소... 기자회견서 눈물"}
-        cand_irrelevant = {"title": "손흥민 토트넘 프리미어리그 경기 일정 안내"}
+        target = {
+            "title": "박세리 이사장, 부친 사문서위조 고소 관련 기자회견",
+            "content": "박세리희망재단 측은 부친의 사문서위조 혐의 고소 건에 대해 기자회견을 열고 공식 입장을 발표했다."
+        }
+        cand_relevant = {
+            "title": "박세리 부친 사문서위조 혐의 고소... 기자회견서 눈물",
+            "description": "박세리 이사장이 부친 고소와 관련해 기자회견을 가졌습니다."
+        }
+        cand_irrelevant = {
+            "title": "손흥민 토트넘 프리미어리그 경기 일정 안내",
+            "description": "토트넘 홋스퍼 경기 중계 안내."
+        }
         
         score_rel = calculate_relevance_score(target, cand_relevant)
         score_irrel = calculate_relevance_score(target, cand_irrelevant)

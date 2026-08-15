@@ -282,28 +282,182 @@ def text_similarity(a: str, b: str) -> float:
         return 0.0
     return SequenceMatcher(None, clean_a, clean_b).ratio()
 
-def are_articles_duplicated(article_a, article_b, threshold: float = 0.75) -> tuple:
+def clean_content_for_comparison(text: str, max_chars: int = 800) -> str:
     """
-    두 기사가 동일 보도자료/통신사 송고문 전재 또는 단순 제목 변경 복사본인지 판별합니다.
-    - 현재: 정규화된 텍스트/제목 유사도(text_similarity) 기반
-    - 확장 설계: 향후 본문 유사도(content_similarity), 도메인, 작성자, 게시시각, 신디케이션 메타데이터 결합 가능
+    기사 본문에서 기자명, 이메일, 저작권 문구, 광고/상투적 헤더·푸터, HTML 잔여물을 제거하고
+    본문 앞부분/핵심 본문(최대 max_chars자)을 정규화하여 반환합니다.
     """
-    title_a = article_a.get("title", "") if isinstance(article_a, dict) else str(article_a or "")
-    title_b = article_b.get("title", "") if isinstance(article_b, dict) else str(article_b or "")
-    sim = text_similarity(title_a, title_b)
-    return (sim >= threshold), sim
+    if not text:
+        return ""
+    
+    # 1. HTML 태그 제거
+    cleaned = re.sub(r'<[^>]+>', ' ', str(text))
+    
+    # 2. 이메일 및 기자명 패턴 제거 (예: xxx@yna.co.kr, [기자 = ...] 등)
+    cleaned = re.sub(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', '', cleaned)
+    cleaned = re.sub(r'\[[^\]]*(?:기자|특파원|뉴스|앵커|취재)[^\]]*\]', '', cleaned)
+    cleaned = re.sub(r'\([^\)]*(?:기자|특파원|뉴스|앵커|취재)[^\)]*\)', '', cleaned)
+    
+    # 3. 저작권 및 상투적 배포 문구 제거
+    patterns_to_remove = [
+        r'무단\s*전재\s*(?:및\s*)?재배포\s*금지',
+        r'저작권자\s*(?:ⓒ|©)[^\n]+',
+        r'Copyrights?\s*(?:ⓒ|©)[^\n]+',
+        r'All\s*rights\s*reserved',
+        r'기사제보\s*및\s*보도자료',
+        r'▶\s*네이버에서\s*[^\n]+',
+        r'▶\s*구독\s*[^\n]+'
+    ]
+    for pat in patterns_to_remove:
+        cleaned = re.sub(pat, '', cleaned, flags=re.IGNORECASE)
+        
+    # 4. 특수문자 및 공백 정규화
+    cleaned = re.sub(r'[^\w\s]', ' ', cleaned)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip().lower()
+    
+    return cleaned[:max_chars]
+
+def content_similarity(content_a: str, content_b: str, max_chars: int = 800) -> float:
+    """
+    두 기사의 정제된 본문 유사도를 0.0 ~ 1.0 사이로 계산합니다.
+    """
+    clean_a = clean_content_for_comparison(content_a, max_chars=max_chars)
+    clean_b = clean_content_for_comparison(content_b, max_chars=max_chars)
+    if not clean_a or not clean_b:
+        return 0.0
+    return SequenceMatcher(None, clean_a, clean_b).ratio()
+
+OPPOSING_POLARITY_PAIRS = [
+    ("확대", "축소"), ("투자", "철회"), ("결정", "철회"), ("찬성", "반대"), 
+    ("증가", "감소"), ("승인", "거부"), ("부인", "인정"), ("사실무근", "사실"),
+    ("취소", "확정"), ("취소", "추진"), ("철회", "추진"), ("거짓", "진실"),
+    ("허위", "사실"), ("체포", "석방"), ("기각", "인용")
+]
+
+def has_opposing_stance(text_a: str, text_b: str) -> bool:
+    """두 텍스트 간에 방향성 대립 단어(예: 투자 vs 철회, 확대 vs 축소 등)가 존재하는지 판별합니다."""
+    clean_a = str(text_a or "")
+    clean_b = str(text_b or "")
+    for p1, p2 in OPPOSING_POLARITY_PAIRS:
+        if (p1 in clean_a and p2 in clean_b) or (p2 in clean_a and p1 in clean_b):
+            return True
+    return False
+
+def are_articles_duplicated(article_a, article_b, title_threshold: float = 0.75, content_threshold: float = 0.70) -> tuple:
+    """
+    두 기사가 동일 기사, 동일 보도자료/통신사 송고문 전재, 또는 단순 제목 변경 복사본인지 판별합니다.
+    
+    판단 규칙:
+    1. 동일 URL 또는 정규화된 제목이 100% 일치 -> True (1.0, "identical_url_or_title")
+    2. 방향성 대립 단어(투자 vs 철회, 찬성 vs 반대 등) 감지 시 -> False ("similar_title_distinct_content")
+    3. 본문이 둘 다 존재하는 경우:
+       - 본문 유사도 >= 0.70 (매우 높음) -> True (동일 보도자료/전재 기사, "syndicated_content")
+       - 제목 유사도 >= 0.75 이면서 본문 유사도 >= 0.45 -> True (유사 제목 + 유사 본문, "similar_title_and_content")
+       - 제목 유사도 >= 0.75 이지만 본문 유사도 < 0.45 -> False (제목만 비슷하고 내용/주장 방향이 다른 기사, "similar_title_distinct_content")
+    4. 본문이 없는 경우 (검색 스니펫/제목만 있는 경우):
+       - 제목 유사도 >= title_threshold -> True ("title_similarity_fallback")
+    
+    반환: (is_duplicate: bool, similarity_score: float, reason: str)
+    """
+    if isinstance(article_a, dict):
+        url_a = article_a.get("link", "")
+        title_a = article_a.get("title", "")
+        content_a = article_a.get("content") or article_a.get("description", "")
+    else:
+        url_a = ""
+        title_a = str(article_a or "")
+        content_a = ""
+
+    if isinstance(article_b, dict):
+        url_b = article_b.get("link", "")
+        title_b = article_b.get("title", "")
+        content_b = article_b.get("content") or article_b.get("description", "")
+    else:
+        url_b = ""
+        title_b = str(article_b or "")
+        content_b = ""
+
+    if url_a and url_b and url_a.strip().lower() == url_b.strip().lower():
+        return (True, 1.0, "same_url")
+
+    # 방향성/주장 대립 단어가 감지된 경우 -> 제목이 비슷해도 절대 중복이 아님
+    if has_opposing_stance(title_a + " " + content_a, title_b + " " + content_b):
+        return (False, 0.0, "similar_title_distinct_content")
+
+    t_sim = text_similarity(title_a, title_b)
+    if t_sim >= 0.99:
+        return (True, t_sim, "identical_title")
+
+    # 본문이 둘 다 일정 길이(40자 이상) 존재하는 경우 본문 유사도 결합
+    has_body_a = len(clean_content_for_comparison(content_a, max_chars=200)) >= 40
+    has_body_b = len(clean_content_for_comparison(content_b, max_chars=200)) >= 40
+
+    if has_body_a and has_body_b:
+        c_sim = content_similarity(content_a, content_b)
+        
+        # 1. 본문이 거의 일치하는 경우 (동일 보도자료/통신사 송고문 전재)
+        if c_sim >= content_threshold:
+            return (True, c_sim, "syndicated_content")
+            
+        # 2. 제목 유사도가 높고 본문도 유의미하게 유사한 경우
+        if t_sim >= title_threshold and c_sim >= 0.45:
+            combined_sim = round((t_sim * 0.4) + (c_sim * 0.6), 2)
+            return (True, combined_sim, "similar_title_and_content")
+            
+        # 3. 제목은 비슷하지만 본문 내용이 다른 경우 (주장 방향이 다르거나 다른 사건) -> 중복 아님!
+        if t_sim >= title_threshold and c_sim < 0.45:
+            return (False, c_sim, "similar_title_distinct_content")
+            
+        # 일반적인 비중복 케이스
+        return (False, max(t_sim, c_sim), "distinct_articles")
+
+    # 본문이 부족한 경우 제목 유사도 기준 판별
+    is_dup = t_sim >= title_threshold
+    reason = "title_similarity_fallback" if is_dup else "distinct_titles"
+    return (is_dup, t_sim, reason)
 
 def calculate_relevance_score(target_article, candidate_source) -> float:
     """
-    검증 대상 기사/주장과 검색된 후보 자료 간의 관련성 점수(0.0 ~ 1.0)를 계산합니다.
-    - 현재: 검증 대상 제목과 후보 기사 제목 간의 텍스트 유사도 기반
-    - 확장 설계: 향후 핵심 주장(Claim)과 기사 본문(Content) 간의 임베딩/의미적 관련성 평가로 확장 가능
+    검증 대상 기사/주장(Claim)과 검색된 후보 자료 간의 관련성 점수(0.0 ~ 1.0)를 계산합니다.
+    
+    고려 요소:
+    1. 제목 텍스트 유사도 (Title similarity)
+    2. 핵심 단어/명사 겹침율 (Keyword overlap ratio)
+    3. 본문/설명 내 핵심 키워드 출현 여부
     """
-    target_title = target_article.get("title", "") if isinstance(target_article, dict) else str(target_article or "")
-    cand_title = candidate_source.get("title", "") if isinstance(candidate_source, dict) else str(candidate_source or "")
-    if not target_title or not cand_title:
+    if isinstance(target_article, dict):
+        target_title = target_article.get("title", "")
+        target_body = target_article.get("content", "")
+    else:
+        target_title = str(target_article or "")
+        target_body = ""
+
+    if isinstance(candidate_source, dict):
+        cand_title = candidate_source.get("title", "")
+        cand_desc = candidate_source.get("description", "")
+        cand_content = candidate_source.get("content", "")
+    else:
+        cand_title = str(candidate_source or "")
+        cand_desc = ""
+        cand_content = ""
+
+    if not target_title and not target_body:
         return 0.5
-    return text_similarity(target_title, cand_title)
+
+    # 1. 제목 유사도
+    t_sim = text_similarity(target_title, cand_title) if (target_title and cand_title) else 0.0
+
+    # 2. 키워드 일치도 (2글자 이상 단어 추출)
+    target_words = set(re.findall(r'[가-힣a-zA-Z0-9]{2,}', target_title + " " + target_body[:200]))
+    if target_words:
+        cand_combined = cand_title + " " + cand_desc + " " + cand_content[:300]
+        overlap_count = sum(1 for w in target_words if w in cand_combined)
+        keyword_score = min(1.0, overlap_count / min(len(target_words), 5))
+    else:
+        keyword_score = 0.5
+
+    score = (keyword_score * 0.55) + (t_sim * 0.45)
+    return max(0.0, min(1.0, round(score, 2)))
 
 def calculate_evidence_quality(sources: list) -> float:
     """
@@ -311,10 +465,10 @@ def calculate_evidence_quality(sources: list) -> float:
     주의: 이 값은 기사의 '진실일 확률'이 아니며, 대조 근거의 완전성/독립성/다양성 수준을 나타냅니다.
     
     반영 요소:
-    1. 출처 가중치 평균 (PRIMARY=1.0, WIRE/MAJOR=0.85, GENERAL=0.70, OTHER=0.50)
-    2. 독립 출처 개수 (3개 이상 시 만점 기준)
-    3. 1차 공식 자료(PRIMARY) 존재 여부 (가산 보너스 +0.15)
-    4. 출처 도메인 다양성 (서로 다른 도메인 비율)
+    1. 출처 가중치 평균 (PRIMARY=1.0, WIRE/MAJOR=0.85, GENERAL=0.70, OTHER=0.50) - 40%
+    2. 독립 출처 개수 (3개 이상 시 만점 기준) - 30%
+    3. 출처 도메인 다양성 (서로 다른 도메인 비율) - 15%
+    4. 1차 공식 자료(PRIMARY) 존재 여부 (가산 보너스 +0.15) - 15%
     """
     if not sources:
         return 0.0
@@ -340,18 +494,18 @@ def calculate_evidence_quality(sources: list) -> float:
     )
     diversity_factor = len(domains) / len(sources) if sources else 1.0
     
-    # 종합 점수 가중 결합 (최대 1.0)
+    # 종합 점수 가중 결합 (최대 1.0, 최소 0.0 clamp)
     base_score = (avg_weight * 0.40) + (independence_factor * 0.30) + (diversity_factor * 0.15) + primary_bonus
     
     return max(0.0, min(1.0, round(base_score, 2)))
 
-def rank_and_select_sources(candidate_sources, max_sources=4, target_title=""):
+def rank_and_select_sources(candidate_sources, max_sources=4, target_title="", target_content="", crawl_candidate_bodies=True):
     """
     수집된 검색 후보 자료(8~10개)를 다각도로 평가하여,
     1) 출처 유형 (PRIMARY > WIRE/MAJOR > GENERAL)
-    2) 유사 제목/동일 보도자료 인용 기사 그룹화 및 중복 제거
+    2) 상위 후보 본문 사전 크롤링 및 제목+본문 융합 유사도 기반 중복/재전재 그룹화
     3) 도메인 다양성 (동일 언론사 독점 방지)
-    4) 관련성 평가
+    4) 관련성 평가 (calculate_relevance_score)
     를 거쳐 최종 3~4개의 독립적이고 신뢰도 높은 근거를 선별합니다.
     """
     if not candidate_sources:
@@ -382,7 +536,8 @@ def rank_and_select_sources(candidate_sources, max_sources=4, target_title=""):
         seen_urls.add(url)
         valid_candidates.append(s)
 
-    # 2. 메타데이터 부착 (도메인, 출처유형, 가중치, 관련성 우선순위 점수)
+    # 2. 1차 메타데이터 부착 (도메인, 출처유형, 가중치, 관련성 우선순위 점수)
+    target_obj = {"title": target_title, "content": target_content}
     scored_candidates = []
     for s in valid_candidates:
         url = s.get("link", "")
@@ -390,10 +545,10 @@ def rank_and_select_sources(candidate_sources, max_sources=4, target_title=""):
         source_type = classify_source(url)
         weight = get_source_weight(url)
         
-        # 검색 대상 제목과의 관련성 (calculate_relevance_score 활용)
-        relevance = calculate_relevance_score(target_title, s)
+        # 검색 대상 제목/본문과의 관련성 (calculate_relevance_score 활용)
+        relevance = calculate_relevance_score(target_obj, s)
             
-        priority_score = (weight * 0.7) + (relevance * 0.3)
+        priority_score = (weight * 0.6) + (relevance * 0.4)
         if source_type == "PRIMARY":
             priority_score += 0.5  # 1차 공식 자료 최우선 가산점
 
@@ -407,14 +562,43 @@ def rank_and_select_sources(candidate_sources, max_sources=4, target_title=""):
     # 우선순위 점수 기준 내림차순 정렬
     scored_candidates.sort(key=lambda x: x["priority_score"], reverse=True)
 
-    # 3. 기사 중복 판단 및 그룹화 (are_articles_duplicated 활용)
-    # 동일 보도자료/통신사 송고문 복사 보도 필터링
+    # 3. 상위 후보군(최대 6개)에 대해 본문 사전 병렬 크롤링 수행 (네트워크 비용 최소화)
+    if crawl_candidate_bodies:
+        candidates_to_crawl = []
+        for i, cand in enumerate(scored_candidates[:6]):
+            if not cand.get("content") and cand.get("link"):
+                link = cand.get("link", "")
+                if link.startswith("http://") or link.startswith("https://"):
+                    candidates_to_crawl.append((i, link))
+
+        if candidates_to_crawl:
+            def fetch_candidate_body(idx, link):
+                try:
+                    scraped = scrape_url_content(link, timeout=2.0 if IS_SERVERLESS else 3.0)
+                    if scraped and scraped.get("content"):
+                        return idx, scraped["content"]
+                except Exception:
+                    pass
+                return idx, ""
+
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=min(4, len(candidates_to_crawl))) as executor:
+                futures = [executor.submit(fetch_candidate_body, idx, link) for idx, link in candidates_to_crawl]
+                for future in futures:
+                    try:
+                        idx, content = future.result()
+                        if content:
+                            scored_candidates[idx]["content"] = content
+                    except Exception:
+                        pass
+
+    # 4. 기사 중복 판단 및 그룹화 (제목 + 본문 융합 유사도 are_articles_duplicated 활용)
     deduped_groups = []
     for candidate in scored_candidates:
         matched_group = False
         for group in deduped_groups:
             rep = group["representative"]
-            is_dup, _ = are_articles_duplicated(candidate, rep, threshold=0.75)
+            is_dup, sim_score, reason = are_articles_duplicated(candidate, rep)
             if is_dup:
                 group["members"].append(candidate)
                 matched_group = True
@@ -427,12 +611,11 @@ def rank_and_select_sources(candidate_sources, max_sources=4, target_title=""):
 
     print(f"    [평가] 후보 자료 {len(candidate_sources)}개 -> 유효 {len(scored_candidates)}개 -> 독립 그룹 {len(deduped_groups)}개 식별")
 
-    # 4. 도메인 다양성을 고려한 최종 선별
-    # PRIMARY 출처는 최우선 포함, 이후에는 동일 도메인 중복을 피하면서 최고 점수 대표 기사 선택
+    # 5. 도메인 다양성을 고려한 최종 선별
     selected_sources = []
     used_domains = set()
 
-    # 4-1. PRIMARY 1차 출처 먼저 선별
+    # 5-1. PRIMARY 1차 출처 먼저 선별
     for group in deduped_groups:
         rep = group["representative"]
         if rep["source_type"] == "PRIMARY" and len(selected_sources) < max_sources:
@@ -441,7 +624,7 @@ def rank_and_select_sources(candidate_sources, max_sources=4, target_title=""):
             selected_sources.append(rep_copy)
             used_domains.add(rep["domain"])
 
-    # 4-2. 주요 독립 언론 및 기타 출처 선별 (도메인 다양성 적용)
+    # 5-2. 주요 독립 언론 및 기타 출처 선별 (도메인 다양성 적용)
     for group in deduped_groups:
         if len(selected_sources) >= max_sources:
             break
@@ -456,7 +639,7 @@ def rank_and_select_sources(candidate_sources, max_sources=4, target_title=""):
         selected_sources.append(rep_copy)
         used_domains.add(rep["domain"])
 
-    # 4-3. 만약 도메인 중복 회피로 인해 max_sources보다 적게 뽑혔다면, 남은 것 중 점수순으로 보충
+    # 5-3. 만약 도메인 중복 회피로 인해 max_sources보다 적게 뽑혔다면, 남은 것 중 점수순으로 보충
     if len(selected_sources) < min(max_sources, len(deduped_groups)):
         for group in deduped_groups:
             if len(selected_sources) >= max_sources:
@@ -478,7 +661,7 @@ def rank_and_select_sources(candidate_sources, max_sources=4, target_title=""):
     for i, s in enumerate(selected_sources):
         synd_info = f" (유사/재인용 {s.get('syndication_count', 1)}건 감지)" if s.get('syndication_count', 1) > 1 else ""
         print(f"      [{i+1}] [{s.get('source_type', 'NEWS')}] ({s.get('domain', '')}) {s.get('title', '')}{synd_info}")
-
+        
     return selected_sources
 
 def fetch_hybrid_news(query, display_count=8):
@@ -1028,7 +1211,11 @@ def fact_check_article_with_sources(target_title, target_content, sources, conte
         }
 
     # 실시간 처리 속도를 올리기 위해 선별된 기사 본문을 병렬로 크롤링합니다. (최대 4개)
+    # 이미 rank_and_select_sources 등에서 크롤링된 본문이 있다면 즉시 재사용합니다.
     ref_contents = [None] * len(sources)
+    for i, s in enumerate(sources):
+        if s.get("content"):
+            ref_contents[i] = s["content"][:1200]
     
     def crawl_source(index, link):
         try:
@@ -1040,7 +1227,10 @@ def fact_check_article_with_sources(target_title, target_content, sources, conte
             print(f"      - [참고 자료 {index+1}] 크롤링 실패: {e}")
         return ""
 
-    links_to_crawl = [(i, s.get('link', '')) for i, s in enumerate(sources) if i < 4 and s.get('link')]
+    links_to_crawl = [
+        (i, s.get('link', '')) for i, s in enumerate(sources)
+        if i < 4 and s.get('link') and not ref_contents[i]
+    ]
     
     if links_to_crawl:
         from concurrent.futures import ThreadPoolExecutor
@@ -1330,8 +1520,13 @@ def check_url_validity(url):
                 except Exception as ext_err:
                     print(f"      [-] 인용 기사 수집 실패: {ext_err}")
 
-        # 2차: 출처 유형 분석, 유사도 기반 중복/재인용 제거, 도메인 다양성 확보를 거쳐 최종 3~4개 선별
-        sources = rank_and_select_sources(candidate_sources, max_sources=4, target_title=article['title'])
+        # 2차: 출처 유형 분석, 본문+제목 융합 유사도 기반 중복/재전재 제거, 도메인 다양성 확보를 거쳐 최종 3~4개 선별
+        sources = rank_and_select_sources(
+            candidate_sources,
+            max_sources=4,
+            target_title=article['title'],
+            target_content=article.get('content', '')
+        )
         print(f"    - 수집된 참고 자료 개수: {len(sources)}개")
             
         print("\n[4] RAG-LLM 기반 상호 팩트체크 대조 분석 중...")
