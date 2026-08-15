@@ -235,10 +235,10 @@ async def check_url(payload: CheckRequest):
                     for s in result.get('sources', []):
                         ref_data.append({
                             "check_id": check_id,
-                            "title": s['title'],
-                            "link": s['link'],
-                            "description": s['description'],
-                            "pub_date": s['pubDate']
+                            "title": s.get('title', ''),
+                            "link": s.get('link', ''),
+                            "description": s.get('description', ''),
+                            "pub_date": s.get('pubDate') or s.get('pub_date', '')
                         })
 
                     if ref_data:
