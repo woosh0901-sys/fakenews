@@ -2,17 +2,23 @@ import os
 import sys
 import httpx
 import urllib.parse
+import re
+import time
+import threading
 from datetime import datetime, timedelta
-from typing import List, Optional
-from fastapi import FastAPI, HTTPException
+from typing import List, Optional, Dict
+from collections import defaultdict
+
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-# Import our RAG pipeline and credentials
+# Import our RAG pipeline, credentials and security utilities
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from fact_checker_by_url import check_url_validity, GeminiRateLimitError
 from naver_news_api import SUPABASE_URL, SUPABASE_KEY, NAVER_CLIENT_ID
+from security_utils import validate_url_safe, sanitize_text, MAX_URL_LENGTH
 
 # Clean SUPABASE_URL to make sure it doesn't end with /rest/v1 or /rest/v1/ (prevent path doubling)
 if SUPABASE_URL:
@@ -24,55 +30,101 @@ if SUPABASE_URL:
     if SUPABASE_URL.endswith("/"):
         SUPABASE_URL = SUPABASE_URL[:-1]
 
+# 히스토리 목록에 노출할 최신 검증 개수. 데이터는 지우지 않고 조회만 제한하므로
+# 통계·랭킹의 누적 집계에는 영향을 주지 않는다.
+HISTORY_LIMIT = 25
+
 SUPABASE_ENABLED = bool(SUPABASE_URL and SUPABASE_KEY and SUPABASE_URL != "여기에_프로젝트_URL_입력")
 if not SUPABASE_ENABLED:
-    print("[-] 경고: Supabase URL 또는 API Key가 설정되지 않았습니다. 검사 결과가 저장되지 않으며 히스토리/통계는 빈 값으로 응답합니다.")
+    print("[-] 알림: Supabase URL 또는 API Key가 설정되지 않았습니다. 결과 저장 및 히스토리/통계 기능이 비활성화됩니다.")
 
-# NLL statistical filter model has been removed.
+IS_PRODUCTION = bool(os.environ.get("VERCEL") or os.environ.get("ENVIRONMENT") == "production")
 
+# FastAPI App Configuration (Disable API docs in production to prevent structure exposure)
+app = FastAPI(
+    title="Fake News Defender Backend API",
+    version="1.0.0",
+    docs_url=None if IS_PRODUCTION else "/docs",
+    redoc_url=None if IS_PRODUCTION else "/redoc",
+    openapi_url=None if IS_PRODUCTION else "/openapi.json"
+)
 
-# FastAPI App
-app = FastAPI(title="Fake News Defender Backend API", version="1.0.0")
+# -------------------------------------------------------------
+# 1. CORS Setup
+# -------------------------------------------------------------
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "https://fakenews-one-pied.vercel.app"
+]
+custom_origin = os.environ.get("ALLOWED_ORIGIN")
+if custom_origin:
+    ALLOWED_ORIGINS.extend([o.strip() for o in custom_origin.split(",") if o.strip()])
 
-# CORS setup for React frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In production, restrict to frontend domain
+    allow_origins=ALLOWED_ORIGINS if IS_PRODUCTION else ["*"],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
-@app.get("/api/debug/env")
-async def debug_env():
-    """Temporary debug endpoint to verify environment variables are loaded."""
-    from fact_checker_by_url import GEMINI_API_KEY as gkey
-    return {
-        "GEMINI_API_KEY": f"{gkey[:6]}...{gkey[-4:]}" if gkey and len(gkey) > 10 else f"EMPTY_OR_SHORT(len={len(gkey) if gkey else 0})",
-        "NAVER_CLIENT_ID": bool(NAVER_CLIENT_ID if 'NAVER_CLIENT_ID' in dir() else os.environ.get("NAVER_CLIENT_ID")),
-        "SUPABASE_URL": SUPABASE_URL[:30] + "..." if SUPABASE_URL and len(SUPABASE_URL) > 30 else str(SUPABASE_URL),
-        "SUPABASE_ENABLED": SUPABASE_ENABLED,
-        "IS_VERCEL": bool(os.environ.get("VERCEL")),
-    }
+# -------------------------------------------------------------
+# 2. Security Headers Middleware
+# -------------------------------------------------------------
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    return response
 
-@app.get("/api/debug/gemini")
-async def debug_gemini():
-    """Temporary debug endpoint to test actual Gemini API call."""
-    import requests as req
-    from fact_checker_by_url import GEMINI_API_KEY as gkey
-    if not gkey:
-        return {"error": "GEMINI_API_KEY is empty"}
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gkey.strip()}"
-        payload = {"contents": [{"parts": [{"text": "Say hello in Korean, one sentence only."}]}]}
-        resp = req.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=15)
-        return {
-            "status_code": resp.status_code,
-            "response_body": resp.json() if resp.status_code == 200 else resp.text[:500],
-            "success": resp.status_code == 200
-        }
-    except Exception as e:
-        return {"error": str(e), "type": type(e).__name__}
+# -------------------------------------------------------------
+# 3. Thread-Safe IP Rate Limiter (Sliding Window)
+# -------------------------------------------------------------
+class InMemoryRateLimiter:
+    """
+    메모리 기반 슬라이딩 윈도우 Rate Limiter.
+    IP별 요청 빈도를 체크하여 API 자원 고갈 및 DDoS/Brute-force를 방어합니다.
+    """
+    def __init__(self):
+        self._requests = defaultdict(list)
+        self._lock = threading.Lock()
+
+    def is_rate_limited(self, ip: str, limit: int, window_seconds: int = 60) -> bool:
+        now = time.time()
+        with self._lock:
+            timestamps = self._requests[ip]
+            valid_timestamps = [t for t in timestamps if now - t < window_seconds]
+            if len(valid_timestamps) >= limit:
+                self._requests[ip] = valid_timestamps
+                return True
+            valid_timestamps.append(now)
+            self._requests[ip] = valid_timestamps
+            return False
+
+rate_limiter = InMemoryRateLimiter()
+
+def get_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "127.0.0.1"
+
+def check_rate_limit(request: Request, limit: int, window_seconds: int = 60, endpoint_name: str = "API"):
+    client_ip = get_client_ip(request)
+    key = f"{client_ip}:{endpoint_name}"
+    if rate_limiter.is_rate_limited(key, limit=limit, window_seconds=window_seconds):
+        raise HTTPException(
+            status_code=429,
+            detail=f"단시간 내에 너무 많은 요청이 발생했습니다 ({limit}회/{window_seconds}초 초과). 잠시 후 다시 시도해 주세요."
+        )
 
 # Helper function to get Supabase API headers
 def get_supabase_headers():
@@ -84,30 +136,72 @@ def get_supabase_headers():
     }
 
 class CheckRequest(BaseModel):
-    url: str
-
-class QueryRequest(BaseModel):
-    query: str
+    url: str = Field(..., max_length=MAX_URL_LENGTH)
 
 class CommentRequest(BaseModel):
-    author: str
-    content: str
-    user_token: Optional[str] = None
+    author: str = Field(default="익명", max_length=30)
+    content: str = Field(..., min_length=1, max_length=1000)
+    user_token: Optional[str] = Field(default=None, max_length=64)
 
-class ReactionRequest(BaseModel):
-    emoji: str
-    is_canceling: Optional[bool] = False
+
+@app.post("/api/preview")
+async def preview_article(payload: CheckRequest, request: Request):
+    """
+    분석 로딩 화면용 경량 미리보기.
+    (Rate limit: 분당 10회, SSRF 방어 적용)
+    """
+    check_rate_limit(request, limit=10, window_seconds=60, endpoint_name="preview")
+    
+    url = payload.url.strip()
+    is_safe, err_msg = validate_url_safe(url)
+    if not is_safe:
+        raise HTTPException(status_code=400, detail=f"안전하지 않거나 허용되지 않는 URL 형식입니다: {err_msg}")
+
+    try:
+        from fact_checker_by_url import (
+            is_instagram_url, is_twitter_url,
+            scrape_instagram_post, scrape_twitter_post, scrape_url_content,
+        )
+
+        if is_instagram_url(url):
+            article, source = scrape_instagram_post(url), "인스타그램"
+        elif is_twitter_url(url):
+            article, source = scrape_twitter_post(url), "X(트위터)"
+        else:
+            article = scrape_url_content(url)
+            source = (article or {}).get("source") or ""
+
+        if not article or not article.get("content"):
+            raise HTTPException(status_code=422, detail="기사 또는 게시글의 본문을 추출할 수 없습니다.")
+
+        return {
+            "title": sanitize_text(article.get("title", ""), max_length=300),
+            "content": sanitize_text(article.get("content", ""), max_length=4000),
+            "source": sanitize_text(source, max_length=100),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[-] 미리보기 추출 에러: {e}")
+        raise HTTPException(status_code=500, detail="미리보기 데이터를 불러오는 중 오류가 발생했습니다.")
+
 
 @app.post("/api/check")
-async def check_url(payload: CheckRequest):
+async def check_url(payload: CheckRequest, request: Request):
+    """
+    팩트체크 분석 실행 엔드포인트.
+    (Rate limit: 분당 5회, SSRF 방어, 악의적 URL 차단, 캐시 적용)
+    """
+    check_rate_limit(request, limit=5, window_seconds=60, endpoint_name="check")
+
     url = payload.url.strip()
-    if not url.startswith("http://") and not url.startswith("https://"):
-        raise HTTPException(status_code=400, detail="올바른 HTTP/HTTPS URL 형식을 입력해 주세요.")
+    is_safe, err_msg = validate_url_safe(url)
+    if not is_safe:
+        raise HTTPException(status_code=400, detail=f"안전하지 않거나 허용되지 않는 URL 형식입니다: {err_msg}")
         
-    # 24시간 내 동일 URL에 대한 캐시가 있는지 먼저 확인하여 API 호출 횟수를 획기적으로 아낍니다.
+    # 24시간 내 동일 URL에 대한 캐시가 있는지 먼저 확인하여 API 호출 횟수를 아낍니다.
     if SUPABASE_ENABLED:
         try:
-            # Supabase timestamps are UTC, query using ISO UTC format
             time_limit = (datetime.utcnow() - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
             cache_query_url = f"{SUPABASE_URL}/rest/v1/checks"
             cache_params = {
@@ -128,7 +222,6 @@ async def check_url(payload: CheckRequest):
                         if cache_item.get("verdict") == "REAL":
                             print(f"[★] 동일 URL에 대한 최근 24시간 내 '진실(REAL)' 캐시된 검사 결과가 있어 DB에서 즉시 반환합니다: {url}")
                             
-                            # Reference format normalization
                             raw_sources = cache_item.get("sources") or []
                             formatted_sources = []
                             for s in raw_sources:
@@ -156,15 +249,13 @@ async def check_url(payload: CheckRequest):
                         else:
                             print(f"[*] 캐시된 기록이 있으나 판정이 {cache_item.get('verdict')}이므로 실시간 재검증을 진행합니다: {url}")
         except Exception as cache_err:
-            print(f"[-] 캐시 조회 실패 (정상 팩트체크 파이프라인으로 진행): {cache_err}")
+            print(f"[-] 캐시 조회 오류 (정상 파이프라인으로 진행): {cache_err}")
             
     try:
-        # Run the fact-checking pipeline in a separate thread pool to prevent event loop blocking
         result = await run_in_threadpool(check_url_validity, url)
         if not result:
             raise HTTPException(status_code=500, detail="기사 본문 크롤링에 실패했거나 안전하지 않은 페이지입니다.")
             
-        # Store result in Supabase Database via REST API asynchronously (일시적 API 에러가 아닌 정상 판정일 때만 저장)
         result['id'] = None
         if SUPABASE_ENABLED:
             if result.get("transient_error"):
@@ -195,9 +286,9 @@ async def check_url(payload: CheckRequest):
                                 del check_data['claims_breakdown']
                                 resp = await client.post(f"{SUPABASE_URL}/rest/v1/checks", headers=headers, json=check_data)
                                 if resp.status_code != 201:
-                                    raise Exception(f"Supabase checks 저장 실패 (HTTP {resp.status_code}): {resp.text}")
+                                    raise Exception(f"Supabase checks 저장 실패 (HTTP {resp.status_code})")
                             else:
-                                raise Exception(f"Supabase checks 저장 실패 (HTTP {resp.status_code}): {resp.text}")
+                                raise Exception(f"Supabase checks 저장 실패 (HTTP {resp.status_code})")
 
                         inserted_check = resp.json()[0]
                         check_id = inserted_check['id']
@@ -207,64 +298,78 @@ async def check_url(payload: CheckRequest):
                         for s in result.get('sources', []):
                             ref_data.append({
                                 "check_id": check_id,
-                                "title": s['title'],
-                                "link": s['link'],
-                                "description": s['description'],
-                                "pub_date": s['pubDate']
+                                "title": s.get('title', ''),
+                                "link": s.get('link', ''),
+                                "description": s.get('description', ''),
+                                "pub_date": s.get('pubDate') or s.get('pub_date', '')
                             })
 
                         if ref_data:
                             resp_ref = await client.post(f"{SUPABASE_URL}/rest/v1/check_references", headers=headers, json=ref_data)
                             if resp_ref.status_code != 201:
-                                raise Exception(f"Supabase check_references 저장 실패 (HTTP {resp_ref.status_code}): {resp_ref.text}")
+                                print(f"[-] check_references 저장 실패: HTTP {resp_ref.status_code}")
 
                         result['id'] = check_id
                 except Exception as db_err:
-                    print(f"[-] 검사 결과 저장 실패 (분석 결과는 정상 반환): {db_err}")
-                    result['warning'] = f"검사는 완료되었지만 결과를 데이터베이스에 저장하지 못했습니다. (오류: {str(db_err)})"
+                    print(f"[-] 검사 결과 저장 실패: {db_err}")
+                    result['warning'] = "검사는 완료되었으나 데이터베이스 저장이 일시적으로 실패했습니다."
         else:
-            result['warning'] = "서버에 Supabase 환경 변수가 설정되지 않아 검사 결과가 저장되지 않았습니다."
+            result['warning'] = "데이터베이스 설정이 없어 결과가 저장되지 않았습니다."
 
         return result
         
+    except HTTPException:
+        raise
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"탐지 분석 도중 에러가 발생했습니다: {str(e)}")
+        print(f"[-] 탐지 분석 중 예외 발생: {e}")
+        raise HTTPException(status_code=500, detail="탐지 분석 중 기술적 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.")
 
 @app.get("/api/history")
-async def get_history():
+async def get_history(request: Request):
+    """최근 검증 기록 조회 (Rate limit: 분당 60회, 최신 HISTORY_LIMIT건만 반환)"""
+    check_rate_limit(request, limit=60, window_seconds=60, endpoint_name="history")
     if not SUPABASE_ENABLED:
         return []
     try:
         headers = get_supabase_headers()
-        # Fetch checks joining with check_references as 'sources' sorting by created_at desc
-        url = f"{SUPABASE_URL}/rest/v1/checks?select=*,sources:check_references(*)&order=created_at.desc"
+        # Fetch checks joining with check_references as 'sources' sorting by created_at desc.
+        # 최신 HISTORY_LIMIT건만 내려준다. 행 자체는 지우지 않으므로 /api/stats 와
+        # /api/stats/rankings 의 누적 집계는 그대로 유지된다.
+        url = (
+            f"{SUPABASE_URL}/rest/v1/checks?select=*,sources:check_references(*)"
+            f"&order=created_at.desc&limit={HISTORY_LIMIT}"
+        )
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(url, headers=headers)
             if resp.status_code != 200:
-                raise Exception(f"Supabase history 조회 실패 (HTTP {resp.status_code}): {resp.text}")
+                raise Exception(f"Supabase history 조회 실패 (HTTP {resp.status_code})")
             return resp.json()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"히스토리 조회 실패: {str(e)}")
+        print(f"[-] 히스토리 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail="히스토리 목록을 불러오는 중 오류가 발생했습니다.")
 
 @app.delete("/api/history/{check_id}")
-async def delete_history_item(check_id: int):
+async def delete_history_item(check_id: int, request: Request):
+    """검증 기록 삭제"""
+    check_rate_limit(request, limit=30, window_seconds=60, endpoint_name="delete_history")
     if not SUPABASE_ENABLED:
-        raise HTTPException(status_code=503, detail="서버에 Supabase 환경 변수가 설정되지 않아 히스토리 기능을 사용할 수 없습니다.")
+        raise HTTPException(status_code=503, detail="데이터베이스 기능이 비활성화되어 있습니다.")
     try:
         headers = get_supabase_headers()
         url = f"{SUPABASE_URL}/rest/v1/checks?id=eq.{check_id}"
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.delete(url, headers=headers)
             if resp.status_code not in (200, 204):
-                raise Exception(f"Supabase 삭제 실패 (HTTP {resp.status_code}): {resp.text}")
+                raise Exception(f"Supabase 삭제 실패 (HTTP {resp.status_code})")
             return {"status": "success", "message": "성공적으로 삭제되었습니다."}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"삭제 실패: {str(e)}")
+        print(f"[-] 기록 삭제 오류: {e}")
+        raise HTTPException(status_code=500, detail="기록 삭제 중 오류가 발생했습니다.")
 
 @app.get("/api/stats")
-async def get_stats():
+async def get_stats(request: Request):
+    """종합 통계 집계 조회 (Rate limit: 분당 60회)"""
+    check_rate_limit(request, limit=60, window_seconds=60, endpoint_name="stats")
     if not SUPABASE_ENABLED:
         return {
             "total_checks": 0,
@@ -280,7 +385,7 @@ async def get_stats():
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(url, headers=headers)
             if resp.status_code != 200:
-                raise Exception(f"Supabase stats 조회 실패 (HTTP {resp.status_code}): {resp.text}")
+                raise Exception(f"Supabase stats 조회 실패 (HTTP {resp.status_code})")
             
             rows = resp.json()
             total_checks = len(rows)
@@ -313,10 +418,16 @@ async def get_stats():
                     
                 nll = row.get("nll_loss")
                 if nll is not None:
-                    total_nll += float(nll)
-                    nll_count += 1
+                    try:
+                        total_nll += float(nll)
+                        nll_count += 1
+                    except (ValueError, TypeError):
+                        pass
                     
-                total_score += float(row.get("contradiction_score") or 0.0)
+                try:
+                    total_score += float(row.get("contradiction_score") or 0.0)
+                except (ValueError, TypeError):
+                    pass
                 
             return {
                 "total_checks": total_checks,
@@ -327,29 +438,35 @@ async def get_stats():
                 "avg_contradiction_score": round(total_score / total_checks, 4)
             }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"통계 계산 실패: {str(e)}")
+        print(f"[-] 통계 집계 오류: {e}")
+        raise HTTPException(status_code=500, detail="통계 데이터를 불러오는 중 오류가 발생했습니다.")
 
 @app.get("/api/stats/rankings")
-async def get_rankings():
+async def get_rankings(request: Request):
+    """최다 검증 및 허위 의심 순위 (Rate limit: 분당 60회)"""
+    check_rate_limit(request, limit=60, window_seconds=60, endpoint_name="rankings")
     if not SUPABASE_ENABLED:
         return {"most_checked": [], "top_fakes": []}
     try:
         headers = get_supabase_headers()
-        url = f"{SUPABASE_URL}/rest/v1/checks?select=url,title,verdict,contradiction_score,created_at"
+        url = f"{SUPABASE_URL}/rest/v1/checks?select=url,title,verdict,contradiction_score,created_at&limit=500"
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(url, headers=headers)
             if resp.status_code != 200:
-                raise Exception(f"Supabase checks 조회 실패 (HTTP {resp.status_code}): {resp.text}")
+                raise Exception(f"Supabase checks 조회 실패 (HTTP {resp.status_code})")
             rows = resp.json()
         
         from collections import Counter
         url_counts = Counter()
         url_titles = {}
         for r in rows:
-            url_counts[r['url']] += 1
+            u = r.get('url', '')
+            if not u:
+                continue
+            url_counts[u] += 1
             r_created = r.get('created_at') or ''
-            if r['url'] not in url_titles or r_created > url_titles[r['url']]['created_at']:
-                url_titles[r['url']] = {'title': r['title'], 'created_at': r_created}
+            if u not in url_titles or r_created > url_titles[u].get('created_at', ''):
+                url_titles[u] = {'title': r.get('title', '제목 없음'), 'created_at': r_created}
                 
         most_checked = []
         for u, count in url_counts.most_common(5):
@@ -359,19 +476,20 @@ async def get_rankings():
                 "count": count
             })
             
-        fakes = [r for r in rows if r['verdict'] in ('FAKE', 'SUSPICIOUS')]
-        fakes.sort(key=lambda x: x['contradiction_score'], reverse=True)
+        fakes = [r for r in rows if r.get('verdict') in ('FAKE', 'SUSPICIOUS')]
+        fakes.sort(key=lambda x: float(x.get('contradiction_score') or 0.0), reverse=True)
         
         top_fakes = []
         seen_urls = set()
         for f in fakes:
-            if f['url'] not in seen_urls:
-                seen_urls.add(f['url'])
+            u = f.get('url', '')
+            if u and u not in seen_urls:
+                seen_urls.add(u)
                 top_fakes.append({
-                    "url": f['url'],
-                    "title": f['title'],
-                    "contradiction_score": f['contradiction_score'],
-                    "verdict": f['verdict']
+                    "url": u,
+                    "title": f.get('title', '제목 없음'),
+                    "contradiction_score": f.get('contradiction_score', 0.0),
+                    "verdict": f.get('verdict', 'SUSPICIOUS')
                 })
                 if len(top_fakes) >= 5:
                     break
@@ -381,144 +499,13 @@ async def get_rankings():
             "top_fakes": top_fakes
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"랭킹 조회 실패: {str(e)}")
-
-@app.post("/api/check/{check_id}/query")
-async def query_check(check_id: int, payload: QueryRequest):
-    user_query = payload.query.strip()
-    if not user_query:
-        raise HTTPException(status_code=400, detail="질문 내용을 입력해 주세요.")
-        
-    if not SUPABASE_ENABLED:
-        raise HTTPException(status_code=503, detail="Supabase 설정이 되지 않아 기사 정보를 찾을 수 없습니다.")
-        
-    try:
-        headers = get_supabase_headers()
-        url = f"{SUPABASE_URL}/rest/v1/checks?id=eq.{check_id}"
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(url, headers=headers)
-            if resp.status_code != 200 or not resp.json():
-                raise HTTPException(status_code=404, detail="해당 검사 기사를 찾을 수 없습니다.")
-            check_item = resp.json()[0]
-        
-        from fact_checker_by_url import fetch_hybrid_news
-        print(f"[*] 추가 분석 실시간 웹 검색 실행 중: {user_query}")
-        sources = await run_in_threadpool(fetch_hybrid_news, user_query, 5)
-        
-        sources_text = ""
-        for i, s in enumerate(sources):
-            sources_text += f"[참고 자료 {i+1}]\n제목: {s['title']}\n내용 요약: {s['description']}\n링크: {s['link']}\n\n"
-            
-        from datetime import datetime
-        current_date = datetime.now().strftime("%Y년 %m월 %d일")
-        
-        prompt = (
-            f"현재 날짜: {current_date}\n"
-            "당신은 가짜 뉴스를 전문적으로 판정하는 팩트체커 AI입니다.\n"
-            "사용자가 검증 기사 본문에 대해 추가로 질문했습니다. 제공된 [검증 대상 기사]와 [추가 검색된 참고 자료]를 기반으로 사용자의 질문에 상세하고 객관적으로 답변해 주세요.\n\n"
-            "[검증 대상 기사]\n"
-            f"제목: {check_item['title']}\n"
-            f"검증 내용 요약: {check_item['reason']}\n\n"
-            "[사용자의 질문]\n"
-            f"{user_query}\n\n"
-            "[추가 검색된 참고 자료 목록]\n"
-            f"{sources_text if sources_text else '검색된 관련 기사가 없습니다.'}\n"
-            "답변 지침:\n"
-            "1. 질문 내용이 사실(True)인지 거짓(False)인지 혹은 판단이 불가한지 명확히 답하고 근거를 서술해 주세요.\n"
-            "2. 대조군 자료를 바탕으로 신뢰할 수 있게 설명하세요.\n"
-            "3. 한글로 상세하지만 간결하게 3~4문장 정도로 답변을 완성하세요.\n"
-            "4. 반드시 마크다운이나 JSON 기호 없이 일반 평서문 텍스트로만 답변해 주세요."
-        )
-        
-        from fact_checker_by_url import GEMINI_API_KEY, call_gemini_api
-        answer = "LLM 연동이 되어 있지 않아 추가 질문에 대한 분석을 진행할 수 없습니다."
-        
-        if GEMINI_API_KEY and GEMINI_API_KEY.strip() and GEMINI_API_KEY.strip() != "YOUR_GEMINI_API_KEY":
-            try:
-                output = await run_in_threadpool(call_gemini_api, prompt)
-                if output:
-                    answer = output
-                else:
-                    answer = "Gemini API 호출에 실패했습니다. 잠시 후 다시 시도해 주세요."
-            except GeminiRateLimitError:
-                answer = "Gemini API의 일시적 호출량 제한(429 Too Many Requests)을 초과했습니다. 무료 API의 경우 1분당 질문 횟수가 제한될 수 있으니, 약 1분 후 다시 시도해 주세요."
-            except Exception as e:
-                answer = f"Gemini API 호출 중 오류가 발생했습니다: {str(e)}"
-        else:
-            answer = "서버에 GEMINI_API_KEY 환경 변수가 설정되지 않아 실시간 AI 답변 기능을 제공할 수 없습니다."
-            
-        return {
-            "query": user_query,
-            "answer": answer,
-            "sources": sources
-        }
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"추가 분석 실패: {str(e)}")
-
-@app.post("/api/chat")
-async def chat_general(payload: QueryRequest):
-    user_query = payload.query.strip()
-    if not user_query:
-        raise HTTPException(status_code=400, detail="질문 내용을 입력해 주세요.")
-        
-    try:
-        from fact_checker_by_url import fetch_hybrid_news
-        print(f"[*] AI 팩트체커 자유 질문 실시간 웹 검색 실행 중: {user_query}")
-        sources = await run_in_threadpool(fetch_hybrid_news, user_query, 5)
-        
-        sources_text = ""
-        for i, s in enumerate(sources):
-            sources_text += f"[참고 자료 {i+1}]\n제목: {s['title']}\n내용 요약: {s['description']}\n링크: {s['link']}\n\n"
-            
-        from datetime import datetime
-        current_date = datetime.now().strftime("%Y년 %m월 %d일")
-        
-        prompt = (
-            f"현재 날짜: {current_date}\n"
-            "당신은 가짜 뉴스를 전문적으로 판정하는 팩트체커 AI 동반자입니다.\n"
-            "사용자가 특정 기사 링크가 아닌, 자유롭게 팩트체크 질문을 던졌습니다. 제공된 [추가 검색된 참고 자료]를 기반으로 사용자의 질문에 매우 상세하고 친절하며 객관적으로 답변해 주세요.\n\n"
-            "[사용자의 질문]\n"
-            f"{user_query}\n\n"
-            "[추가 검색된 참고 자료 목록]\n"
-            f"{sources_text if sources_text else '검색된 관련 기사가 없습니다.'}\n"
-            "답변 지침:\n"
-            "1. 질문 내용이 언론 보도나 팩트 상 사실(True)인지 거짓(False)인지 혹은 판단유보(Suspicious)인지 두괄식으로 명확히 답해 주세요.\n"
-            "2. 대조군 자료 및 교차 검증된 보도 내용을 바탕으로 논리정연하고 신뢰할 수 있게 설명하세요.\n"
-            "3. 한글로 친절하되 객관적인 어조로 상세히 서술해 주세요.\n"
-            "4. 마크다운 형식(글머리 기호, 굵은 글씨 등)을 활용해 가독성 있게 정리해 주세요."
-        )
-        
-        from fact_checker_by_url import GEMINI_API_KEY, call_gemini_api
-        answer = "LLM 연동이 되어 있지 않아 팩트체크 대화 분석을 진행할 수 없습니다."
-        
-        if GEMINI_API_KEY and GEMINI_API_KEY.strip() and GEMINI_API_KEY.strip() != "YOUR_GEMINI_API_KEY":
-            try:
-                output = await run_in_threadpool(call_gemini_api, prompt)
-                if output:
-                    answer = output
-                else:
-                    answer = "Gemini API 호출에 실패했습니다. 잠시 후 다시 시도해 주세요."
-            except GeminiRateLimitError:
-                answer = "Gemini API의 일시적 호출량 제한(429 Too Many Requests)을 초과했습니다. 무료 API의 경우 1분당 질문 횟수가 제한될 수 있으니, 약 1분 후 다시 시도해 주세요."
-            except Exception as e:
-                answer = f"Gemini API 호출 중 오류가 발생했습니다: {str(e)}"
-        else:
-            answer = "서버에 GEMINI_API_KEY 환경 변수가 설정되지 않아 실시간 AI 답변 기능을 제공할 수 없습니다."
-            
-        return {
-            "query": user_query,
-            "answer": answer,
-            "sources": sources
-        }
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"AI 자유 질문 분석 실패: {str(e)}")
+        print(f"[-] 랭킹 집계 오류: {e}")
+        raise HTTPException(status_code=500, detail="랭킹 데이터를 불러오는 중 오류가 발생했습니다.")
 
 @app.get("/api/history/{check_id}/comments")
-async def get_comments(check_id: int):
+async def get_comments(check_id: int, request: Request):
+    """댓글 목록 조회 (Rate limit: 분당 60회)"""
+    check_rate_limit(request, limit=60, window_seconds=60, endpoint_name="get_comments")
     if not SUPABASE_ENABLED:
         return []
     try:
@@ -527,21 +514,26 @@ async def get_comments(check_id: int):
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(url, headers=headers)
             if resp.status_code != 200:
-                raise Exception(f"Supabase 댓글 조회 실패 (HTTP {resp.status_code}): {resp.text}")
+                raise Exception(f"Supabase 댓글 조회 실패 (HTTP {resp.status_code})")
             return resp.json()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"댓글 조회 실패: {str(e)}")
+        print(f"[-] 댓글 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail="댓글을 불러오는 중 오류가 발생했습니다.")
 
 @app.post("/api/history/{check_id}/comments")
-async def add_comment(check_id: int, payload: CommentRequest):
-    author = payload.author.strip() or "익명"
-    content = payload.content.strip()
-    user_token = payload.user_token
+async def add_comment(check_id: int, payload: CommentRequest, request: Request):
+    """댓글 등록 (Rate limit: 분당 10회, XSS/입력값 살균 적용)"""
+    check_rate_limit(request, limit=10, window_seconds=60, endpoint_name="add_comment")
+    
+    author = sanitize_text(payload.author, max_length=30) or "익명"
+    content = sanitize_text(payload.content, max_length=1000)
+    user_token = sanitize_text(payload.user_token or "", max_length=64) or None
+    
     if not content:
-        raise HTTPException(status_code=400, detail="댓글 내용을 입력해 주세요.")
+        raise HTTPException(status_code=400, detail="유효한 댓글 내용을 입력해 주세요.")
         
     if not SUPABASE_ENABLED:
-        raise HTTPException(status_code=503, detail="Supabase 설정이 필요합니다.")
+        raise HTTPException(status_code=503, detail="데이터베이스 기능이 비활성화되어 있습니다.")
         
     try:
         headers = get_supabase_headers()
@@ -554,15 +546,18 @@ async def add_comment(check_id: int, payload: CommentRequest):
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(f"{SUPABASE_URL}/rest/v1/check_comments", headers=headers, json=comment_data)
             if resp.status_code != 201:
-                raise Exception(f"Supabase 댓글 저장 실패 (HTTP {resp.status_code}): {resp.text}")
+                raise Exception(f"Supabase 댓글 저장 실패 (HTTP {resp.status_code})")
             return resp.json()[0]
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"댓글 저장 실패: {str(e)}")
+        print(f"[-] 댓글 등록 오류: {e}")
+        raise HTTPException(status_code=500, detail="댓글을 저장하는 중 오류가 발생했습니다.")
 
 @app.delete("/api/history/{check_id}/comments/{comment_id}")
-async def delete_comment(check_id: int, comment_id: int, user_token: str):
+async def delete_comment(check_id: int, comment_id: int, user_token: str, request: Request):
+    """댓글 삭제 (본인 인증 토큰 일치 검증)"""
+    check_rate_limit(request, limit=20, window_seconds=60, endpoint_name="delete_comment")
     if not SUPABASE_ENABLED:
-        raise HTTPException(status_code=503, detail="Supabase 설정이 필요합니다.")
+        raise HTTPException(status_code=503, detail="데이터베이스 기능이 비활성화되어 있습니다.")
         
     try:
         headers = get_supabase_headers()
@@ -575,92 +570,21 @@ async def delete_comment(check_id: int, comment_id: int, user_token: str):
             comment = resp_get.json()[0]
             db_token = comment.get("user_token")
             
-            if db_token and db_token != user_token:
+            # 본인 토큰 검증
+            if db_token and db_token != user_token.strip():
                 raise HTTPException(status_code=403, detail="본인이 작성한 댓글만 삭제할 수 있습니다.")
                 
             del_url = f"{SUPABASE_URL}/rest/v1/check_comments?id=eq.{comment_id}"
             resp_del = await client.delete(del_url, headers=headers)
             if resp_del.status_code not in (200, 204):
-                raise Exception(f"Supabase 댓글 삭제 실패 (HTTP {resp_del.status_code}): {resp_del.text}")
+                raise Exception(f"Supabase 댓글 삭제 실패 (HTTP {resp_del.status_code})")
                 
             return {"status": "success", "message": "댓글이 삭제되었습니다."}
     except HTTPException as he:
         raise he
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"댓글 삭제 실패: {str(e)}")
-
-@app.get("/api/history/{check_id}/reactions")
-async def get_reactions(check_id: int):
-    if not SUPABASE_ENABLED:
-        return []
-    try:
-        headers = get_supabase_headers()
-        url = f"{SUPABASE_URL}/rest/v1/check_reactions?check_id=eq.{check_id}"
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(url, headers=headers)
-            if resp.status_code != 200:
-                raise Exception(f"Supabase 리액션 조회 실패 (HTTP {resp.status_code}): {resp.text}")
-            return resp.json()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"리액션 조회 실패: {str(e)}")
-
-@app.post("/api/history/{check_id}/reactions")
-async def add_reaction(check_id: int, payload: ReactionRequest):
-    emoji = payload.emoji.strip()
-    is_canceling = payload.is_canceling
-    if not emoji:
-        raise HTTPException(status_code=400, detail="이모지가 없습니다.")
-        
-    if not SUPABASE_ENABLED:
-        raise HTTPException(status_code=503, detail="Supabase 설정이 필요합니다.")
-        
-    try:
-        headers = get_supabase_headers()
-        url = f"{SUPABASE_URL}/rest/v1/check_reactions?check_id=eq.{check_id}&emoji=eq.{emoji}"
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp_get = await client.get(url, headers=headers)
-            
-            if resp_get.status_code == 200 and resp_get.json():
-                existing = resp_get.json()[0]
-                if is_canceling:
-                    new_count = int(existing['count']) - 1
-                    if new_count <= 0:
-                        del_url = f"{SUPABASE_URL}/rest/v1/check_reactions?id=eq.{existing['id']}"
-                        resp_del = await client.delete(del_url, headers=headers)
-                        if resp_del.status_code not in (200, 204):
-                            raise Exception(f"Supabase 리액션 삭제 실패 (HTTP {resp_del.status_code}): {resp_del.text}")
-                        existing['count'] = 0
-                        return existing
-                    else:
-                        update_url = f"{SUPABASE_URL}/rest/v1/check_reactions?id=eq.{existing['id']}"
-                        resp_up = await client.patch(update_url, headers=headers, json={"count": new_count})
-                        if resp_up.status_code not in (200, 204):
-                            raise Exception(f"Supabase 리액션 수정 실패 (HTTP {resp_up.status_code}): {resp_up.text}")
-                        existing['count'] = new_count
-                        return existing
-                else:
-                    new_count = int(existing['count']) + 1
-                    update_url = f"{SUPABASE_URL}/rest/v1/check_reactions?id=eq.{existing['id']}"
-                    resp_up = await client.patch(update_url, headers=headers, json={"count": new_count})
-                    if resp_up.status_code not in (200, 204):
-                        raise Exception(f"Supabase 리액션 수정 실패 (HTTP {resp_up.status_code}): {resp_up.text}")
-                    existing['count'] = new_count
-                    return existing
-            else:
-                if is_canceling:
-                    return {"check_id": check_id, "emoji": emoji, "count": 0}
-                    
-                reaction_data = {
-                    "check_id": check_id,
-                    "emoji": emoji,
-                    "count": 1
-                }
-                resp_in = await client.post(f"{SUPABASE_URL}/rest/v1/check_reactions", headers=headers, json=reaction_data)
-                if resp_in.status_code != 201:
-                    raise Exception(f"Supabase 리액션 저장 실패 (HTTP {resp_in.status_code}): {resp_in.text}")
-                return resp_in.json()[0]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"리액션 저장 실패: {str(e)}")
+        print(f"[-] 댓글 삭제 오류: {e}")
+        raise HTTPException(status_code=500, detail="댓글 삭제 중 오류가 발생했습니다.")
 
 if __name__ == "__main__":
     import uvicorn
@@ -668,5 +592,5 @@ if __name__ == "__main__":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
     
-    print("[*] Supabase 클라우드 데이터베이스 모드로 Uvicorn 서버를 가동합니다.")
+    print("[*] Fake News Defender 백엔드 서버를 가동합니다.")
     uvicorn.run("backend_app:app", host="127.0.0.1", port=8000, reload=True)
