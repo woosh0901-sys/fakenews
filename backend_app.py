@@ -586,6 +586,169 @@ async def delete_comment(check_id: int, comment_id: int, user_token: str, reques
         print(f"[-] 댓글 삭제 오류: {e}")
         raise HTTPException(status_code=500, detail="댓글 삭제 중 오류가 발생했습니다.")
 
+class ReactionRequest(BaseModel):
+    emoji: str = Field(..., max_length=10)
+    is_canceling: bool = False
+
+@app.get("/api/history/{check_id}/reactions")
+async def get_reactions(check_id: int, request: Request):
+    """리액션 통계 조회 (Rate limit: 분당 60회)"""
+    check_rate_limit(request, limit=60, window_seconds=60, endpoint_name="get_reactions")
+    if not SUPABASE_ENABLED:
+        return []
+    try:
+        headers = get_supabase_headers()
+        url = f"{SUPABASE_URL}/rest/v1/check_reactions?check_id=eq.{check_id}"
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code != 200:
+                raise Exception(f"Supabase 리액션 조회 실패 (HTTP {resp.status_code})")
+            return resp.json()
+    except Exception as e:
+        print(f"[-] 리액션 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail="리액션 데이터를 불러오는 중 오류가 발생했습니다.")
+
+@app.post("/api/history/{check_id}/reactions")
+async def add_reaction(check_id: int, payload: ReactionRequest, request: Request):
+    """이모지 리액션 등록 및 취소 (Rate limit: 분당 30회)"""
+    check_rate_limit(request, limit=30, window_seconds=60, endpoint_name="add_reaction")
+    emoji = sanitize_text(payload.emoji, max_length=10)
+    if not emoji or emoji not in ("👍", "👎", "😮", "😡"):
+        raise HTTPException(status_code=400, detail="허용되지 않는 이모지입니다.")
+        
+    if not SUPABASE_ENABLED:
+        raise HTTPException(status_code=503, detail="데이터베이스 기능이 비활성화되어 있습니다.")
+        
+    try:
+        headers = get_supabase_headers()
+        url = f"{SUPABASE_URL}/rest/v1/check_reactions?check_id=eq.{check_id}&emoji=eq.{urllib.parse.quote(emoji)}"
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp_get = await client.get(url, headers=headers)
+            existing = resp_get.json() if resp_get.status_code == 200 else []
+            
+            if existing and len(existing) > 0:
+                curr_count = existing[0].get("count", 1)
+                new_count = max(0, curr_count - 1) if payload.is_canceling else curr_count + 1
+                patch_url = f"{SUPABASE_URL}/rest/v1/check_reactions?id=eq.{existing[0]['id']}"
+                resp_patch = await client.patch(patch_url, headers=headers, json={"count": new_count})
+                if resp_patch.status_code not in (200, 204):
+                    raise Exception(f"리액션 업데이트 실패 (HTTP {resp_patch.status_code})")
+                return {"emoji": emoji, "count": new_count}
+            else:
+                new_count = 0 if payload.is_canceling else 1
+                resp_post = await client.post(
+                    f"{SUPABASE_URL}/rest/v1/check_reactions",
+                    headers=headers,
+                    json={"check_id": check_id, "emoji": emoji, "count": new_count}
+                )
+                if resp_post.status_code != 201:
+                    raise Exception(f"리액션 저장 실패 (HTTP {resp_post.status_code})")
+                return {"emoji": emoji, "count": new_count}
+    except Exception as e:
+        print(f"[-] 리액션 처리 오류: {e}")
+        raise HTTPException(status_code=500, detail="리액션 처리 중 오류가 발생했습니다.")
+
+class QueryRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=500)
+
+@app.post("/api/check/{check_id}/query")
+async def query_check_report(check_id: int, payload: QueryRequest, request: Request):
+    """기사 정밀 진단 레포트 대상 Q&A 질문 답변 (Rate limit: 분당 10회)"""
+    check_rate_limit(request, limit=10, window_seconds=60, endpoint_name="query_check")
+    user_query = sanitize_text(payload.query, max_length=500)
+    if not user_query:
+        raise HTTPException(status_code=400, detail="질문을 입력해 주세요.")
+        
+    if not SUPABASE_ENABLED:
+        raise HTTPException(status_code=503, detail="데이터베이스 기능이 비활성화되어 있습니다.")
+        
+    try:
+        headers = get_supabase_headers()
+        url = f"{SUPABASE_URL}/rest/v1/checks?id=eq.{check_id}&select=*,sources:check_references(*)"
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code != 200 or not resp.json():
+                raise HTTPException(status_code=404, detail="검증 기록을 찾을 수 없습니다.")
+            check_data = resp.json()[0]
+            
+        sources_text = "\n".join([
+            f"- [{s.get('title')}] {s.get('description', '')}"
+            for s in (check_data.get("sources") or [])
+        ])
+        
+        prompt = (
+            "당신은 팩트체크 검증 시스템의 AI 어시스턴트입니다.\n"
+            f"검증 기사 제목: {check_data.get('title')}\n"
+            f"판정 결과: {check_data.get('verdict')} (모순율: {check_data.get('contradiction_score')})\n"
+            f"종합 소견: {check_data.get('reason')}\n"
+            f"참고 자료 목록:\n{sources_text}\n\n"
+            f"사용자 추가 질문: {user_query}\n\n"
+            "위 사실 관계와 참고 자료를 바탕으로 사용자의 질문에 대해 명확하고 논리정연하게 답변해 주세요."
+        )
+        
+        from fact_checker_by_url import call_gemini_api
+        answer = await run_in_threadpool(call_gemini_api, prompt)
+        if not answer:
+            answer = "현재 AI 답변을 생성할 수 없습니다. 잠시 후 다시 질문해 주세요."
+            
+        return {"answer": answer}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[-] Q&A 분석 에러: {e}")
+        raise HTTPException(status_code=500, detail="Q&A 답변 생성 중 오류가 발생했습니다.")
+
+@app.post("/api/chat")
+async def assistant_chat(payload: QueryRequest, request: Request):
+    """AI 팩트체크 자유 질문 챗봇 (Rate limit: 분당 10회, 실시간 웹 검색 연동)"""
+    check_rate_limit(request, limit=10, window_seconds=60, endpoint_name="chat")
+    user_query = sanitize_text(payload.query, max_length=500)
+    if not user_query:
+        raise HTTPException(status_code=400, detail="질문 내용을 입력해 주세요.")
+        
+    try:
+        from fact_checker_by_url import fetch_hybrid_news, call_gemini_api, extract_keywords_fast
+        
+        # 1. 키워드 추출 및 실시간 하이브리드 웹 검색
+        keywords = extract_keywords_fast(user_query)
+        search_query = " ".join(keywords) if keywords else user_query
+        sources = await run_in_threadpool(fetch_hybrid_news, search_query, display_count=5)
+        
+        sources_summary = "\n".join([
+            f"[{i+1}] 제목: {s.get('title')}\n요약: {s.get('description')}\n출처 링크: {s.get('link')}"
+            for i, s in enumerate(sources[:4])
+        ])
+        
+        prompt = (
+            "당신은 실시간 팩트체크 AI 어시스턴트입니다.\n"
+            "사용자가 질문한 사실 관계나 소문/루머에 대해, 아래 실시간 검색된 최신 언론 보도 및 웹 자료를 바탕으로 진위 여부와 배경을 알기 쉽게 설명해 주세요.\n\n"
+            f"사용자 질문: {user_query}\n\n"
+            f"[실시간 수집된 관련 보도 자료]\n{sources_summary}\n\n"
+            "답변 지침:\n"
+            "1. 수집된 보도 내용을 바탕으로 사실(True), 허위(False), 논란/미확인 중 어떤 상태인지 명확히 짚어주세요.\n"
+            "2. 친절하고 신뢰감 있는 어조로 2~3개 문단 이내로 요약해 설명하세요.\n"
+            "3. 참고 자료가 부족하다면 섣불리 단정하지 말고 확인된 사실과 미확인 사실을 구분해 설명하세요."
+        )
+        
+        answer = await run_in_threadpool(call_gemini_api, prompt)
+        if not answer:
+            answer = "실시간 검색 자료를 분석하지 못했습니다. 질문을 조금 더 구체적으로 작성해 보세요."
+            
+        formatted_sources = [
+            {"title": s.get("title"), "link": s.get("link"), "description": s.get("description")}
+            for s in sources[:4]
+        ]
+        
+        return {
+            "answer": answer,
+            "sources": formatted_sources
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[-] 어시스턴트 챗봇 오류: {e}")
+        raise HTTPException(status_code=500, detail="챗봇 분석 중 오류가 발생했습니다.")
+
 if __name__ == "__main__":
     import uvicorn
     import io
