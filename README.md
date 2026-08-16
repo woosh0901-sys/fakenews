@@ -103,6 +103,7 @@ flowchart TD
 ├── test_security.py             # SSRF, Rate Limit, 보안 헤더 등 보안 단위 테스트 (9개)
 ├── test_rag_pipeline.py         # 본문 재평가, 중복제거, 1차자료 우선, 근거품질 단위 테스트 (14개)
 ├── test_backend_and_llm.py      # 백엔드 API, 상호 모순 처리, 메트릭 불변성 통합 테스트 (3개)
+├── test_naver_news_api.py       # NAVER API HUB 뉴스 검색 API 단위 테스트 (7개)
 ├── frontend/
 │   ├── src/
 │   │   ├── App.jsx              # 뉴스 에디토리얼 대시보드 메인
@@ -170,8 +171,9 @@ ALTER TABLE check_reactions DISABLE ROW LEVEL SECURITY;
 ### 6.2. 환경 변수 설정 (`.env`)
 프로젝트 루트 폴더에 `.env` 파일을 생성하고 아래 양식에 맞추어 API 키를 입력합니다.
 ```ini
-NAVER_CLIENT_ID=여러분의_네이버_클라이언트_ID
-NAVER_CLIENT_SECRET=여러분의_네이버_클라이언트_SECRET
+# NAVER Cloud Platform NAVER API HUB 검색 API 인증 정보
+NAVER_CLIENT_ID=여러분의_NAVER_API_HUB_CLIENT_ID
+NAVER_CLIENT_SECRET=여러분의_NAVER_API_HUB_CLIENT_SECRET
 GEMINI_API_KEY=여러분의_GEMINI_API_KEY
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_KEY=your-supabase-anon-or-service-role-key
@@ -197,14 +199,15 @@ npm run dev
 
 ## 🧪 7. 자동화 테스트 실행 (Test Suites)
 
-총 **26개 단위 및 통합 테스트**로 파이프라인 무결성을 상시 검증합니다:
+총 **33개 단위 및 통합 테스트**로 파이프라인 무결성을 상시 검증합니다:
 
 ```bash
-# 전체 테스트 스위트 (26개 단위/통합 테스트) 실행
-python -m unittest test_security.py test_rag_pipeline.py test_backend_and_llm.py
+# 전체 테스트 스위트 (33개 단위/통합 테스트) 실행
+python -m unittest discover
 
 # 개별 테스트 실행
-python test_security.py       # SSRF 방어, Rate Limit, 보안 헤더, 살균 등 9개 테스트
-python test_rag_pipeline.py   # 본문 재평가, 중복제거, 1차자료 우선, 근거품질 산출 등 14개 테스트
+python test_security.py        # SSRF 방어, Rate Limit, 보안 헤더, 살균 등 9개 테스트
+python test_rag_pipeline.py    # 본문 재평가, 중복제거, 1차자료 우선, 근거품질 산출 등 14개 테스트
 python test_backend_and_llm.py # 백엔드 API, 상호 모순 처리, 메트릭 불변성 등 3개 테스트
+python test_naver_news_api.py  # NAVER API HUB 엔드포인트, 헤더, 파싱, 에러처리 등 7개 테스트
 ```
