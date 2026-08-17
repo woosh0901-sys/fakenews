@@ -241,9 +241,9 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
 /* 가중치 막대 */
 .weights{ margin-top:46px; }
 .wbar{ display:flex; height:72px; width:100%; }
-.wbar span{ display:flex; align-items:baseline; justify-content:center; gap:2px;
+.wbar span{ display:flex; align-items:center; justify-content:center; gap:2px;
   font-size:34px; font-weight:900; color:#fff; letter-spacing:-.01em;
-  font-variant-numeric:tabular-nums; padding-top:18px; }
+  font-variant-numeric:tabular-nums; line-height:1; }
 .wbar span small{ font-size:20px; font-weight:800; }
 .wkey{ margin-top:26px; display:flex; gap:40px; flex-wrap:wrap; }
 .wkey b{ display:flex; align-items:center; gap:12px; font-size:26px; font-weight:600; color:var(--body); }
@@ -391,7 +391,7 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
       <span class="dateline">제작 배경</span>
     </div>
     <div class="kicker reveal" style="margin-top:30px">기존 방식은 왜 틀리는가</div>
-    <h2 class="head reveal" style="font-size:42px;margin-top:8px;max-width:1640px">가짜뉴스는 <span class="ac">SNS와 커뮤니티로</span> 더 빨리 퍼집니다. 그런데 자동으로 검증하려 하면 <span class="hv">다섯 군데</span>에서 걸려 넘어집니다.</h2>
+    <h2 class="head reveal" style="font-size:42px;margin-top:8px;max-width:1640px">가짜뉴스는 <span class="ac">SNS와 커뮤니티로</span> 더 빨리 퍼집니다.<br>그런데 자동으로 검증하려 하면 <span class="hv">다섯 군데</span>에서 걸려 넘어집니다.</h2>
     <div class="list tight reveal" style="margin-top:18px">
       <div class="row"><span class="n">01</span><div><div class="t">LLM 환각 및 과도한 추론 의존</div><div class="d">통계 계산까지 모델에 맡기면 <b>지어낸 숫자</b>가 그대로 지표가 됩니다.</div></div></div>
       <div class="row"><span class="n">02</span><div><div class="t">보도자료 복제 기사 과다 계상</div><div class="d">송고문 <b>하나</b>를 수십 곳이 받아쓴 것을 <b>독립 근거 수십 개</b>로 셉니다.</div></div></div>
@@ -765,11 +765,11 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
     <div class="kicker reveal" style="margin-top:32px">화면 01 · 02 — 랜딩과 분석</div>
     <div class="demo reveal">
       <div class="feat">
-        <p><b>링크 전용 입력</b> — 일반 문장은 <b>서버로 보내지 않고</b> 화면 안에서 알립니다</p>
+        <p><b>링크 전용 입력</b> — 일반 문장은 <b>서버로 보내지 않고</b><br>화면 안에서 알립니다</p>
         <p><b>Top 5 티커</b> — 가장 많이 검증된 기사가 <b>4초마다</b> 한 칸씩, hover하면 멈춥니다</p>
         <p><b>출처명 표시</b> — 페이지 메타데이터에서 매체명을 읽어 옵니다</p>
         <p><b>본문 스캔</b> — <b>실제 수집한 기사</b>가 1.7초마다 한 문단씩 올라갑니다</p>
-        <p><b>분석 중인 문단만 진하게</b> — 문단 높이를 실측해 정확히 한 칸씩 정렬합니다</p>
+        <p><b>분석 중인 문단만 진하게</b> — 문단 높이를 실측해 정확히<br>한 칸씩 정렬합니다</p>
         <p><b>반응형</b> — 좁은 화면에서 안내 문구와 줄바꿈이 바뀝니다</p>
       </div>
       <div class="shot">
@@ -828,7 +828,7 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
         <p><b>고정 랭킹 레일</b> — 본문을 따라오며 레일 안쪽만 스크롤</p>
         <p><b>모바일 순서 전환</b> — 좁은 화면에서는 랭킹이 히스토리보다 먼저</p>
         <p><b>히스토리 표</b> — 판정 · 기사 · 모순율 · 삭제</p>
-        <p><b>목록은 25건, 통계는 전체</b> — <b>데이터를 지우지 않아</b> 누적 지표가 정확합니다</p>
+        <p><b>목록은 25건, 통계는 전체</b> — <b>데이터를 지우지 않아</b><br>누적 지표가 정확합니다</p>
       </div>
       <div class="shot">
         <div class="ic">SCREEN RECORDING</div>
