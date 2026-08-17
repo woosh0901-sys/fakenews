@@ -3,10 +3,11 @@
 판별기 시연을 위해 만든 **허위 기사** 정적 페이지입니다. 배포되면 아래 주소로 열립니다.
 
 ```
-https://<앱주소>/demo/                     ← 목록
-https://<앱주소>/demo/power-demand.html    ← 전력수요 (권장 시연용)
-https://<앱주소>/demo/minimum-wage.html    ← 최저임금
-https://<앱주소>/demo/semiconductor.html   ← 반도체 수출
+https://<앱주소>/demo/                         ← 목록
+https://<앱주소>/demo/four-day-workweek.html   ← 주 4.5일제 (의심 / SUSPICIOUS 시연용)
+https://<앱주소>/demo/power-demand.html        ← 전력수요 (가짜뉴스 / FAKE 권장 시연용)
+https://<앱주소>/demo/minimum-wage.html        ← 최저임금 (가짜뉴스 / FAKE)
+https://<앱주소>/demo/semiconductor.html       ← 반도체 수출 (가짜뉴스 / FAKE)
 ```
 
 `vercel.json`의 `rewrites`는 파일시스템 확인 뒤에 적용되므로, 이 정적 파일들이 SPA 폴백보다 우선합니다.
