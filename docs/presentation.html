@@ -92,6 +92,19 @@ body{ font-family:var(--font); color:var(--ink); -webkit-font-smoothing:antialia
 .slide{ font-family:var(--font); }
 
 /* ===========================================
+   EMPHASIS — 강조 3단계
+   b   : ExtraBold(800), 먹색으로 끌어올림
+   .hv : Heavy(900), 문장 안에서 가장 무거운 한 마디
+   .ac : Heavy + 강조색, 슬라이드당 한 곳만
+   =========================================== */
+.slide b, .slide strong{ font-weight:800; color:var(--ink); }
+.slide .hv{ font-weight:900; color:var(--ink); letter-spacing:-.015em; }
+.slide .ac{ font-weight:900; color:var(--navy-l); letter-spacing:-.015em; }
+.slide .ac-f{ font-weight:900; color:var(--fake); letter-spacing:-.015em; }
+.sec b, .sec strong, .sec .hv{ color:#fff; }
+.sec .ac{ color:var(--navy-l); }
+
+/* ===========================================
    SLIDE CHROME — 제호 괘선 · 쪽 번호
    =========================================== */
 .pad{ position:absolute; inset:0; padding:60px var(--pad-x) 68px; display:flex; flex-direction:column; }
@@ -221,10 +234,11 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
 
 /* 가중치 막대 */
 .weights{ margin-top:46px; }
-.wbar{ display:flex; height:64px; width:100%; border:3px solid var(--ink); }
-.wbar span{ display:flex; align-items:center; justify-content:center;
-  font-size:25px; font-weight:800; color:#fff; letter-spacing:.02em; }
-.wbar span + span{ border-left:3px solid var(--ink); }
+.wbar{ display:flex; height:72px; width:100%; }
+.wbar span{ display:flex; align-items:baseline; justify-content:center; gap:2px;
+  font-size:34px; font-weight:900; color:#fff; letter-spacing:-.01em;
+  font-variant-numeric:tabular-nums; padding-top:18px; }
+.wbar span small{ font-size:20px; font-weight:800; }
 .wkey{ margin-top:26px; display:flex; gap:40px; flex-wrap:wrap; }
 .wkey b{ display:flex; align-items:center; gap:12px; font-size:26px; font-weight:600; color:var(--body); }
 .wkey b i{ width:24px; height:24px; display:block; }
@@ -293,9 +307,7 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
 .slide.visible .reveal:nth-child(6){ transition-delay:.45s; }
 .slide.visible .reveal:nth-child(7){ transition-delay:.53s; }
 .d0{ transition-delay:0s !important; }
-/* 제호 괘선은 좌→우로 그어진다 */
-.masthead{ transform:scaleX(0); transform-origin:0 50%; transition:transform .9s var(--ease); }
-.slide.visible .masthead{ transform:scaleX(1); }
+/* 제호·괘선·목차는 슬라이드가 바뀌어도 움직이지 않는 고정 요소다 */
 
 /* ===========================================
    DECK CHROME — 진행 막대 · 편집 토글
@@ -333,7 +345,7 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
     </div>
     <div class="meter"><i></i></div>
     <div class="t-title reveal">근거까지 보여주는 팩트체크</div>
-    <div class="t-stand reveal">기사의 주장을 하나씩 떼어 진실·거짓으로 분류하고,<br>그 판정을 뒷받침한 교차 출처를 함께 제시합니다.</div>
+    <div class="t-stand reveal">기사의 주장을 <b>하나씩 떼어</b> 진실·거짓으로 분류하고,<br>그 판정을 뒷받침한 <b>교차 출처</b>를 함께 제시합니다.</div>
     <div class="legend reveal">
       <span class="leg a"><i></i>진짜</span>
       <span class="leg b"><i></i>가짜</span>
@@ -355,7 +367,7 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
     <div class="stack">
       <div class="sec-num reveal">01</div>
       <div class="sec-name reveal">제작 배경</div>
-      <div class="sec-note reveal">가짜뉴스를 자동으로 검증하려 할 때 마주치는 다섯 가지 기술적 함정과, 그것을 피하기 위해 세운 원칙.</div>
+      <div class="sec-note reveal">가짜뉴스를 자동으로 검증하려 할 때 마주치는 다섯 가지 <b>기술적 함정</b>과, 그것을 피하기 위해 세운 <b>원칙</b>.</div>
       <div class="sec-rule reveal"></div>
     </div>
     <span class="folio">02</span>
@@ -374,7 +386,7 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
     <div class="stack">
       <div class="kicker reveal">문제</div>
       <h2 class="head reveal">가짜뉴스는 기사보다<br><em>SNS와 커뮤니티로</em> 더 빨리 퍼집니다.</h2>
-      <p class="lede reveal">그런데 이것을 자동으로 검증하려고 하면, 기술적으로 다섯 군데에서 걸려 넘어집니다.</p>
+      <p class="lede reveal">그런데 이것을 자동으로 검증하려고 하면, 기술적으로 <span class="hv">다섯 군데</span>에서 걸려 넘어집니다.</p>
     </div>
     <span class="folio">03</span>
   </div>
@@ -391,11 +403,11 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
     </div>
     <div class="kicker reveal" style="margin-top:38px">기존 방식은 왜 틀리는가</div>
     <div class="list reveal">
-      <div class="row"><span class="n">01</span><div><div class="t">LLM 환각 및 과도한 추론 의존</div><div class="d">출처 개수 같은 통계 계산까지 모델에 맡기면, 지어낸 숫자가 그대로 지표가 됩니다.</div></div></div>
-      <div class="row"><span class="n">02</span><div><div class="t">보도자료 복제 기사 과다 계상</div><div class="d">통신사 송고문 하나를 수십 곳이 받아쓴 것을 독립 근거 수십 개로 셉니다.</div></div></div>
-      <div class="row"><span class="n">03</span><div><div class="t">제목만 유사하고 주장은 반대인 기사</div><div class="d">제목 유사도만 보면 정반대의 근거가 중복으로 묶입니다.</div></div></div>
-      <div class="row"><span class="n">04</span><div><div class="t">검색 메타데이터와 실제 본문 불일치</div><div class="d">낚시성 제목과 스니펫만으로는 관련성을 판별할 수 없습니다.</div></div></div>
-      <div class="row"><span class="n">05</span><div><div class="t">SSRF · 프롬프트 인젝션 취약성</div><div class="d">사용자가 넣은 URL을 그대로 크롤링하는 서비스는 그 자체가 공격 표면입니다.</div></div></div>
+      <div class="row"><span class="n">01</span><div><div class="t">LLM 환각 및 과도한 추론 의존</div><div class="d">통계 계산까지 모델에 맡기면 <b>지어낸 숫자</b>가 그대로 지표가 됩니다.</div></div></div>
+      <div class="row"><span class="n">02</span><div><div class="t">보도자료 복제 기사 과다 계상</div><div class="d">송고문 <b>하나</b>를 수십 곳이 받아쓴 것을 <b>독립 근거 수십 개</b>로 셉니다.</div></div></div>
+      <div class="row"><span class="n">03</span><div><div class="t">제목만 유사하고 주장은 반대인 기사</div><div class="d">제목 유사도만 보면 <b>정반대의 근거</b>가 중복으로 묶입니다.</div></div></div>
+      <div class="row"><span class="n">04</span><div><div class="t">검색 메타데이터와 실제 본문 불일치</div><div class="d">낚시성 제목과 스니펫만으로는 <b>관련성을 판별할 수 없습니다</b>.</div></div></div>
+      <div class="row"><span class="n">05</span><div><div class="t">SSRF · 프롬프트 인젝션 취약성</div><div class="d">사용자가 넣은 URL을 그대로 크롤링하는 서비스는 <b>그 자체가 공격 표면</b>입니다.</div></div></div>
     </div>
     <span class="folio">04</span>
   </div>
@@ -423,7 +435,7 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
           <div class="m">근거 B</div>
         </div>
       </div>
-      <p class="lede reveal" style="margin-top:50px">제목 유사도만 계산하면 이 둘은 <b>같은 기사</b>로 묶여 하나가 버려집니다.<br>정반대의 사실이 검증에서 사라지는 것입니다.</p>
+      <p class="lede reveal" style="margin-top:50px">제목 유사도만 계산하면 이 둘은 <span class="hv">같은 기사</span>로 묶여 하나가 버려집니다.<br><span class="ac-f">정반대의 사실</span>이 검증에서 사라지는 것입니다.</p>
     </div>
     <span class="folio">05</span>
   </div>
@@ -456,7 +468,7 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
       <span class="dateline">제작 배경</span>
     </div>
     <div class="kicker reveal" style="margin-top:38px">역할 분담</div>
-    <h2 class="head reveal" style="font-size:56px">무엇을 코드가 정하고, 무엇을 모델이 판단하는가</h2>
+    <h2 class="head reveal" style="font-size:56px">무엇을 <span class="ac">코드가</span> 정하고, 무엇을 <span class="ac">모델이</span> 판단하는가</h2>
     <div class="duo split reveal">
       <div>
         <div class="cap">PYTHON이 확정</div>
@@ -493,7 +505,7 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
     <div class="stack">
       <div class="sec-num reveal">02</div>
       <div class="sec-name reveal">적용 기술 및 구조</div>
-      <div class="sec-note reveal">개발 환경과 배포 구조, 그리고 2단계 적응형 RAG 파이프라인.</div>
+      <div class="sec-note reveal">개발 환경과 배포 구조, 그리고 <b>2단계 적응형 RAG 파이프라인</b>.</div>
       <div class="sec-rule reveal"></div>
     </div>
     <span class="folio">08</span>
@@ -511,9 +523,9 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
     </div>
     <div class="kicker reveal" style="margin-top:38px">개발 환경</div>
     <table class="spec reveal">
-      <tr><th>백엔드</th><td>Python 3 · FastAPI · Uvicorn<small>비동기 HTTP 클라이언트로 httpx 사용</small></td></tr>
-      <tr><th>프론트엔드</th><td>React 19 · Vite 8 · Tailwind CSS 4<small>Helvetica + SUIT 조판, 다크모드 없는 단일 지면</small></td></tr>
-      <tr><th>데이터베이스</th><td>Supabase — PostgreSQL · PostgREST<small>ORM 없이 REST 호출, 서버리스 커넥션 풀 문제 회피</small></td></tr>
+      <tr><th>백엔드</th><td>Python 3 · FastAPI · Uvicorn<small>비동기 HTTP 클라이언트로 <b>httpx</b> 사용</small></td></tr>
+      <tr><th>프론트엔드</th><td>React 19 · Vite 8 · Tailwind CSS 4<small><b>Helvetica + SUIT</b> 조판, 다크모드 없는 단일 지면</small></td></tr>
+      <tr><th>데이터베이스</th><td>Supabase — PostgreSQL · PostgREST<small><b>ORM 없이 REST 호출</b>, 서버리스 커넥션 풀 문제 회피</small></td></tr>
       <tr><th>로컬 실행</th><td>python backend_app.py / npm run dev<small>localhost:5173</small></td></tr>
     </table>
     <span class="folio">09</span>
@@ -530,7 +542,7 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
       <span class="dateline">적용 기술</span>
     </div>
     <div class="kicker reveal" style="margin-top:38px">배포 환경</div>
-    <h2 class="head reveal" style="font-size:52px">저장소 하나에서 정적 빌드와 서버리스 함수가 함께 나갑니다</h2>
+    <h2 class="head reveal" style="font-size:52px">저장소 <span class="ac">하나</span>에서 정적 빌드와 서버리스 함수가 함께 나갑니다</h2>
     <div class="ba reveal" style="margin-top:30px">
       <div class="band">
         <div class="lbl">/API/(.*)</div>
@@ -539,7 +551,7 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
       <div class="band">
         <div class="lbl">그 외 모든 경로</div>
         <div class="flow"><span class="step hot">정적 자산</span><span class="arw">→</span><span class="step hot">단일 페이지 앱</span></div>
-        <div class="note">파일시스템을 먼저 확인한 뒤 규칙을 적용하므로, 시연용 데모 페이지가 SPA 폴백보다 우선합니다.</div>
+        <div class="note"><b>파일시스템을 먼저 확인한 뒤</b> 규칙을 적용하므로, 시연용 데모 페이지가 SPA 폴백보다 우선합니다.</div>
       </div>
     </div>
     <div class="figs reveal" style="margin-top:26px">
@@ -688,7 +700,7 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
             <span class="step" style="border-color:#CBD5E1;color:#CBD5E1;text-decoration:line-through">실시간 검색</span>
             <span class="step" style="border-color:#CBD5E1;color:#CBD5E1;text-decoration:line-through">LLM 호출</span>
           </div>
-          <div class="note">외부 API 호출량과 응답 시간을 동시에 줄입니다. 반면 ‘가짜’와 ‘의심’은 캐시하지 않고 매번 다시 검증합니다. 후속 보도로 상황이 바뀔 수 있기 때문입니다.</div>
+          <div class="note"><b>외부 API 호출량과 응답 시간을 동시에</b> 줄입니다. 반면 ‘가짜’와 ‘의심’은 <b>캐시하지 않고 매번 다시 검증</b>합니다. 후속 보도로 상황이 바뀔 수 있기 때문입니다.</div>
         </div>
       </div>
     </div>
@@ -706,17 +718,17 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
       <span class="dateline">핵심 기술 01</span>
     </div>
     <div class="kicker reveal" style="margin-top:34px">핵심 기술 01 — 2단계 적응형 RAG</div>
-    <h2 class="head reveal" style="font-size:54px">제목이 아니라 본문을 읽고 다시 줄을 세웁니다</h2>
+    <h2 class="head reveal" style="font-size:54px">제목이 아니라 <span class="ac">본문을 읽고</span> 다시 줄을 세웁니다</h2>
     <div class="ba reveal" style="margin-top:38px">
       <div class="band">
         <div class="lbl">1단계 — 메타데이터만으로 판단</div>
         <div class="flow"><span class="step">제목 · 스니펫</span><span class="arw">→</span><span class="step">점수</span><span class="arw">→</span><span class="step">상위 3건</span></div>
-        <div class="note">제목만 그럴듯한 낚시성 기사가 근거로 섞여 들어옵니다.</div>
+        <div class="note"><b>제목만 그럴듯한 낚시성 기사</b>가 근거로 섞여 들어옵니다.</div>
       </div>
       <div class="band">
         <div class="lbl">2단계 — 본문을 읽고 다시 판단</div>
         <div class="flow"><span class="step hot">후보 6건</span><span class="arw">→</span><span class="step hot">본문 병렬 크롤링</span><span class="arw">→</span><span class="step hot">재점수 · 재정렬</span><span class="arw">→</span><span class="step hot">상위 3건</span></div>
-        <div class="note">크롤링에 실패한 후보는 1차 점수를 그대로 유지해 파이프라인이 멈추지 않습니다.</div>
+        <div class="note">크롤링에 실패한 후보는 <b>1차 점수를 그대로 유지</b>해 파이프라인이 멈추지 않습니다.</div>
       </div>
     </div>
     <span class="folio">14</span>
@@ -733,11 +745,11 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
       <span class="dateline">핵심 기술 02</span>
     </div>
     <div class="kicker reveal" style="margin-top:34px">핵심 기술 02 — 본문 기반 중복 검출</div>
-    <h2 class="head reveal" style="font-size:54px">방향이 반대면, 제목이 같아도 다른 근거입니다</h2>
+    <h2 class="head reveal" style="font-size:54px">방향이 반대면, 제목이 같아도 <span class="ac">다른 근거</span>입니다</h2>
     <div class="list reveal" style="margin-top:34px">
-      <div class="row"><span class="n">01</span><div><div class="t">상투 문구 정규화</div><div class="d">기자명 · 이메일 · 저작권 · 배포 문구를 먼저 걷어냅니다.</div></div></div>
-      <div class="row"><span class="n">02</span><div><div class="t">본문 유사도 + 제목 유사도 결합</div><div class="d">받아쓴 보도자료를 하나의 출처로 묶습니다.</div></div></div>
-      <div class="row"><span class="n">03</span><div><div class="t">대립 방향성 감지</div><div class="d">투자↔철회, 찬성↔반대, 사실무근↔사실을 감지하면 중복에서 분리해 보존합니다.</div></div></div>
+      <div class="row"><span class="n">01</span><div><div class="t">상투 문구 정규화</div><div class="d">기자명 · 이메일 · 저작권 · 배포 문구를 <b>먼저 걷어냅니다</b>.</div></div></div>
+      <div class="row"><span class="n">02</span><div><div class="t">본문 유사도 + 제목 유사도 결합</div><div class="d">받아쓴 보도자료를 <b>하나의 출처</b>로 묶습니다.</div></div></div>
+      <div class="row"><span class="n">03</span><div><div class="t">대립 방향성 감지</div><div class="d"><b>투자↔철회, 찬성↔반대, 사실무근↔사실</b>을 감지하면 중복에서 분리해 보존합니다.</div></div></div>
     </div>
     <span class="folio">15</span>
   </div>
@@ -753,13 +765,13 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
       <span class="dateline">핵심 기술 03</span>
     </div>
     <div class="kicker reveal" style="margin-top:34px">핵심 기술 03 — 근거 품질 지표</div>
-    <h2 class="head reveal" style="font-size:54px">이 값도 모델이 아니라 코드가 계산합니다</h2>
+    <h2 class="head reveal" style="font-size:54px">이 값도 모델이 아니라 <span class="ac">코드가</span> 계산합니다</h2>
     <div class="weights reveal">
       <div class="wbar">
-        <span style="width:40%;background:#1E3A5F">40%</span>
-        <span style="width:30%;background:#396BAC">30%</span>
-        <span style="width:15%;background:#027A48">15%</span>
-        <span style="width:15%;background:#B54708">15%</span>
+        <span style="width:40%;background:#1E3A5F">40<small>%</small></span>
+        <span style="width:30%;background:#396BAC">30<small>%</small></span>
+        <span style="width:15%;background:#027A48">15<small>%</small></span>
+        <span style="width:15%;background:#B54708">15<small>%</small></span>
       </div>
       <div class="wkey">
         <b><i style="background:#1E3A5F"></i>출처 가중치 평균</b>
@@ -785,7 +797,7 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
     <div class="stack">
       <div class="sec-num reveal">03</div>
       <div class="sec-name reveal">주요 기능</div>
-      <div class="sec-note reveal">링크 하나를 넣으면 자동으로 이어지는 세 화면 — 랜딩, 분석, 대시보드.</div>
+      <div class="sec-note reveal">링크 하나를 넣으면 자동으로 이어지는 <b>세 화면</b> — 랜딩, 분석, 대시보드.</div>
       <div class="sec-rule reveal"></div>
     </div>
     <span class="folio">17</span>
@@ -831,8 +843,8 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
     <div class="demo reveal">
       <div class="feat">
         <p><b>계단식 진입 애니메이션</b> — 문구와 입력창이 순서대로 떠오릅니다</p>
-        <p><b>링크 전용 입력</b> — 일반 문장은 서버로 보내지 않고 화면 안에서 알립니다</p>
-        <p><b>Top 5 티커</b> — 가장 많이 검증된 기사가 4초마다 한 칸씩</p>
+        <p><b>링크 전용 입력</b> — 일반 문장은 <b>서버로 보내지 않고</b> 화면 안에서 알립니다</p>
+        <p><b>Top 5 티커</b> — 가장 많이 검증된 기사가 <b>4초마다</b> 한 칸씩</p>
         <p><b>다섯 단계 페이드</b> — 1위는 크고 굵게, 아래로 갈수록 흐리게</p>
         <p><b>hover 일시정지</b> — 읽는 도중 화면이 바뀌지 않습니다</p>
         <p><b>반응형 문구</b> — 좁은 화면에서 안내 문구와 줄바꿈이 바뀝니다</p>
@@ -860,9 +872,9 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
       <div class="feat">
         <p><b>부드러운 전환</b> — 티커가 먼저 빠지고 분석 블록이 올라옵니다</p>
         <p><b>출처명 표시</b> — 페이지 메타데이터에서 매체명을 읽어 옵니다</p>
-        <p><b>본문 스캔</b> — 실제 수집한 기사가 1.7초마다 한 문단씩</p>
+        <p><b>본문 스캔</b> — <b>실제 수집한 기사</b>가 1.7초마다 한 문단씩</p>
         <p><b>분석 중인 문단만 진하게</b> — 지금 읽는 위치를 보여줍니다</p>
-        <p><b>문단 높이 실측 정렬</b> — 고정 픽셀이 아니라 실제 위치를 재서 맞춥니다</p>
+        <p><b>문단 높이 실측 정렬</b> — 고정 픽셀이 아니라 <b>실제 위치를 재서</b> 맞춥니다</p>
         <p><b>위아래 페이드</b> — 문단이 잘려 보이지 않습니다</p>
       </div>
       <div class="shot">
@@ -914,10 +926,10 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
     <div class="kicker reveal" style="margin-top:32px">화면 04 — 정밀 진단 레포트</div>
     <div class="demo reveal">
       <div class="feat">
-        <p><b>자동 스크롤</b> — 검증 직후와 히스토리 클릭이 같게 동작합니다</p>
+        <p><b>자동 스크롤</b> — 검증 직후와 히스토리 클릭이 <b>같게</b> 동작합니다</p>
         <p><b>결론이 맨 위</b> — 판정 → 모순율 → 막대 → 제목 → 데이트라인</p>
-        <p><b>모순율은 불일치 정도</b> — 진실일 확률이 아닙니다</p>
-        <p><b>요소별 세부 검증</b> — 주장을 하나씩 진실 · 거짓 · 판단유보로</p>
+        <p><b>모순율은 불일치 정도</b> — <span class="ac-f">진실일 확률이 아닙니다</span></p>
+        <p><b>요소별 세부 검증</b> — 주장을 <b>하나씩</b> 진실 · 거짓 · 판단유보로</p>
         <p><b>교차 검증 출처</b> — 참고문헌 형식으로 번호를 붙여 제시</p>
         <p><b>공동 팩트체크</b> — 익명 토큰으로 본인 댓글만 삭제</p>
       </div>
@@ -942,12 +954,12 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
     <div class="kicker reveal" style="margin-top:32px">화면 05 — 통계 · 랭킹 · 히스토리</div>
     <div class="demo reveal">
       <div class="feat">
-        <p><b>숫자가 곧 필터</b> — 가짜를 누르면 히스토리가 가짜만 남습니다</p>
+        <p><b>숫자가 곧 필터</b> — 가짜를 누르면 히스토리가 <b>가짜만</b> 남습니다</p>
         <p><b>판정 분포 막대</b> — 진짜 · 가짜 · 의심 비율을 한 줄로</p>
         <p><b>고정 랭킹 레일</b> — 본문을 따라오며 레일 안쪽만 스크롤</p>
         <p><b>모바일 순서 전환</b> — 좁은 화면에서는 랭킹이 히스토리보다 먼저</p>
         <p><b>히스토리 표</b> — 판정 · 기사 · 모순율 · 삭제</p>
-        <p><b>목록은 25건, 통계는 전체</b> — 데이터를 지우지 않아 누적 지표가 정확합니다</p>
+        <p><b>목록은 25건, 통계는 전체</b> — <b>데이터를 지우지 않아</b> 누적 지표가 정확합니다</p>
       </div>
       <div class="shot">
         <div class="ic">SCREEN RECORDING</div>
@@ -970,7 +982,7 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
     <div class="stack">
       <div class="sec-num reveal">04</div>
       <div class="sec-name reveal">기대효과</div>
-      <div class="sec-note reveal">이 시스템이 실제로 무엇을 가능하게 하는가.</div>
+      <div class="sec-note reveal">이 시스템이 <b>실제로 무엇을 가능하게</b> 하는가.</div>
       <div class="sec-rule reveal"></div>
     </div>
     <span class="folio">24</span>
@@ -991,22 +1003,22 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
       <div>
         <div class="qn">01</div>
         <div class="qt">검증 가능한 판정</div>
-        <div class="qd">결론만 내놓지 않고 주장별 판정과 교차 출처를 함께 제시합니다. 사용자가 근거를 직접 확인하고 반박할 수 있습니다.</div>
+        <div class="qd">결론만 내놓지 않고 <b>주장별 판정과 교차 출처</b>를 함께 제시합니다. 사용자가 <b>근거를 직접 확인하고 반박</b>할 수 있습니다.</div>
       </div>
       <div>
         <div class="qn">02</div>
         <div class="qt">LLM 환각 억제</div>
-        <div class="qd">지표를 코드로 확정했기 때문에 모델이 지어낸 숫자가 올라오지 않습니다. 같은 입력에 지표가 재현됩니다.</div>
+        <div class="qd">지표를 <b>코드로 확정</b>했기 때문에 모델이 지어낸 숫자가 올라오지 않습니다. 같은 입력에 <b>지표가 재현</b>됩니다.</div>
       </div>
       <div>
         <div class="qn">03</div>
         <div class="qt">SNS 루머 대응</div>
-        <div class="qd">인스타그램과 X 게시물을 전용 파서로 처리해 기사와 같은 파이프라인에 태웁니다. 본문에 인용된 뉴스도 직접 수집합니다.</div>
+        <div class="qd">인스타그램과 X 게시물을 전용 파서로 처리해 <b>기사와 같은 파이프라인</b>에 태웁니다. 본문에 인용된 뉴스도 <b>직접 수집</b>합니다.</div>
       </div>
       <div>
         <div class="qn">04</div>
         <div class="qt">공개 가능한 안전성</div>
-        <div class="qd">DNS 단계에서 사설망과 메타데이터 주소를 차단하고 리다이렉트마다 재검증합니다. 요청 제한과 텍스트 격리를 더했습니다.</div>
+        <div class="qd"><b>DNS 단계에서</b> 사설망과 메타데이터 주소를 차단하고 <b>리다이렉트마다 재검증</b>합니다. 요청 제한과 텍스트 격리를 더했습니다.</div>
       </div>
     </div>
     <span class="folio">25</span>
