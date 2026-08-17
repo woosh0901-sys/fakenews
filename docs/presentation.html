@@ -90,6 +90,10 @@ img, video, canvas, svg { max-width:100%; max-height:100%; }
    =========================================== */
 body{ font-family:var(--font); color:var(--ink); -webkit-font-smoothing:antialiased; }
 .slide{ font-family:var(--font); }
+/* 한글은 어절 단위로만 줄바꿈한다 — 낱말 중간에서 끊기는 것을 막는다 */
+.slide p, .slide .qd, .slide .d, .slide .note, .slide .lede, .slide .sec-note,
+.slide .t-stand, .slide .cap, .slide td, .slide .items p, .slide .feat p{
+  word-break:keep-all; overflow-wrap:break-word; }
 
 /* ===========================================
    EMPHASIS — 강조 3단계
@@ -187,6 +191,8 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
 .list .row{ display:grid; grid-template-columns:96px 1fr; gap:34px; align-items:baseline;
   padding:26px 0; border-top:1px solid var(--hair); }
 .list .row:last-child{ border-bottom:1px solid var(--hair); }
+.list.tight .row{ padding:21px 0; }
+.list.tight .d{ margin-top:6px; }
 .list .n{ font-size:38px; font-weight:900; color:var(--faint); font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
 .list .t{ font-size:38px; font-weight:800; letter-spacing:-.02em; color:var(--ink); }
 .list .d{ margin-top:8px; font-size:26px; font-weight:400; line-height:1.62; color:var(--mute); }
@@ -367,30 +373,13 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
     <div class="stack">
       <div class="sec-num reveal">01</div>
       <div class="sec-name reveal">제작 배경</div>
-      <div class="sec-note reveal">가짜뉴스를 자동으로 검증하려 할 때 마주치는 다섯 가지 <b>기술적 함정</b>과, 그것을 피하기 위해 세운 <b>원칙</b>.</div>
+      <div class="sec-note reveal">가짜뉴스를 자동으로 검증하려 할 때 마주치는 다섯 가지 <b>기술적 함정</b>과,<br>그것을 피하기 위해 세운 <b>원칙</b>.</div>
       <div class="sec-rule reveal"></div>
     </div>
     <span class="folio">02</span>
   </div>
 </section>
 
-<!-- ══════════════════════════════════════════
-     03 · 문제 진술
-     ══════════════════════════════════════════ -->
-<section class="slide">
-  <div class="pad">
-    <div class="masthead">
-      <span class="wordmark">Fake News Defender</span>
-      <span class="dateline">제작 배경</span>
-    </div>
-    <div class="stack">
-      <div class="kicker reveal">문제</div>
-      <h2 class="head reveal">가짜뉴스는 기사보다<br><em>SNS와 커뮤니티로</em> 더 빨리 퍼집니다.</h2>
-      <p class="lede reveal">그런데 이것을 자동으로 검증하려고 하면, 기술적으로 <span class="hv">다섯 군데</span>에서 걸려 넘어집니다.</p>
-    </div>
-    <span class="folio">03</span>
-  </div>
-</section>
 
 <!-- ══════════════════════════════════════════
      04 · 기존 방식의 다섯 가지 한계
@@ -401,8 +390,9 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
       <span class="wordmark">Fake News Defender</span>
       <span class="dateline">제작 배경</span>
     </div>
-    <div class="kicker reveal" style="margin-top:38px">기존 방식은 왜 틀리는가</div>
-    <div class="list reveal">
+    <div class="kicker reveal" style="margin-top:30px">기존 방식은 왜 틀리는가</div>
+    <h2 class="head reveal" style="font-size:42px;margin-top:8px;max-width:1640px">가짜뉴스는 <span class="ac">SNS와 커뮤니티로</span> 더 빨리 퍼집니다. 그런데 자동으로 검증하려 하면 <span class="hv">다섯 군데</span>에서 걸려 넘어집니다.</h2>
+    <div class="list tight reveal" style="margin-top:18px">
       <div class="row"><span class="n">01</span><div><div class="t">LLM 환각 및 과도한 추론 의존</div><div class="d">통계 계산까지 모델에 맡기면 <b>지어낸 숫자</b>가 그대로 지표가 됩니다.</div></div></div>
       <div class="row"><span class="n">02</span><div><div class="t">보도자료 복제 기사 과다 계상</div><div class="d">송고문 <b>하나</b>를 수십 곳이 받아쓴 것을 <b>독립 근거 수십 개</b>로 셉니다.</div></div></div>
       <div class="row"><span class="n">03</span><div><div class="t">제목만 유사하고 주장은 반대인 기사</div><div class="d">제목 유사도만 보면 <b>정반대의 근거</b>가 중복으로 묶입니다.</div></div></div>
@@ -526,42 +516,13 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
       <tr><th>백엔드</th><td>Python 3 · FastAPI · Uvicorn<small>비동기 HTTP 클라이언트로 <b>httpx</b> 사용</small></td></tr>
       <tr><th>프론트엔드</th><td>React 19 · Vite 8 · Tailwind CSS 4<small><b>Helvetica + SUIT</b> 조판, 다크모드 없는 단일 지면</small></td></tr>
       <tr><th>데이터베이스</th><td>Supabase — PostgreSQL · PostgREST<small><b>ORM 없이 REST 호출</b>, 서버리스 커넥션 풀 문제 회피</small></td></tr>
+      <tr><th>배포</th><td>Vercel 단일 배포 — 정적 빌드 + Python 서버리스 함수<small><b>/api/(.*)</b>는 함수로, 나머지는 SPA로. 파일시스템을 먼저 확인하므로 데모 페이지가 우선합니다 · 함수 실행 한도 <b>60초</b></small></td></tr>
       <tr><th>로컬 실행</th><td>python backend_app.py / npm run dev<small>localhost:5173</small></td></tr>
     </table>
     <span class="folio">09</span>
   </div>
 </section>
 
-<!-- ══════════════════════════════════════════
-     10 · 배포 환경
-     ══════════════════════════════════════════ -->
-<section class="slide">
-  <div class="pad">
-    <div class="masthead">
-      <span class="wordmark">Fake News Defender</span>
-      <span class="dateline">적용 기술</span>
-    </div>
-    <div class="kicker reveal" style="margin-top:38px">배포 환경</div>
-    <h2 class="head reveal" style="font-size:52px">저장소 <span class="ac">하나</span>에서 정적 빌드와 서버리스 함수가 함께 나갑니다</h2>
-    <div class="ba reveal" style="margin-top:30px">
-      <div class="band">
-        <div class="lbl">/API/(.*)</div>
-        <div class="flow"><span class="step">서버리스 함수</span><span class="arw">→</span><span class="step">FastAPI 앱</span><span class="arw">→</span><span class="step">팩트체크 파이프라인</span></div>
-      </div>
-      <div class="band">
-        <div class="lbl">그 외 모든 경로</div>
-        <div class="flow"><span class="step hot">정적 자산</span><span class="arw">→</span><span class="step hot">단일 페이지 앱</span></div>
-        <div class="note"><b>파일시스템을 먼저 확인한 뒤</b> 규칙을 적용하므로, 시연용 데모 페이지가 SPA 폴백보다 우선합니다.</div>
-      </div>
-    </div>
-    <div class="figs reveal" style="margin-top:26px">
-      <div><div class="v">60<span style="font-size:44px">초</span></div><div class="k">함수 최대 실행 시간</div></div>
-      <div><div class="v">1</div><div class="k">배포 대상 — Vercel 단일</div></div>
-      <div><div class="v">0</div><div class="k">관리 서버</div></div>
-    </div>
-    <span class="folio">10</span>
-  </div>
-</section>
 
 <!-- ══════════════════════════════════════════
      11 · 개발 도구 및 언어
@@ -751,39 +712,26 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
       <div class="row"><span class="n">02</span><div><div class="t">본문 유사도 + 제목 유사도 결합</div><div class="d">받아쓴 보도자료를 <b>하나의 출처</b>로 묶습니다.</div></div></div>
       <div class="row"><span class="n">03</span><div><div class="t">대립 방향성 감지</div><div class="d"><b>투자↔철회, 찬성↔반대, 사실무근↔사실</b>을 감지하면 중복에서 분리해 보존합니다.</div></div></div>
     </div>
-    <span class="folio">15</span>
-  </div>
-</section>
 
-<!-- ══════════════════════════════════════════
-     16 · 핵심 기술 ③ 근거 품질 지표
-     ══════════════════════════════════════════ -->
-<section class="slide">
-  <div class="pad">
-    <div class="masthead">
-      <span class="wordmark">Fake News Defender</span>
-      <span class="dateline">핵심 기술 03</span>
-    </div>
-    <div class="kicker reveal" style="margin-top:34px">핵심 기술 03 — 근거 품질 지표</div>
-    <h2 class="head reveal" style="font-size:54px">이 값도 모델이 아니라 <span class="ac">코드가</span> 계산합니다</h2>
-    <div class="weights reveal">
-      <div class="wbar">
+    <div class="kicker reveal" style="margin-top:38px">핵심 기술 03 — 근거 품질 지표 <span class="ac">이 값도 코드가 계산합니다</span></div>
+    <div class="weights reveal" style="margin-top:16px">
+      <div class="wbar" style="height:56px">
         <span style="width:40%;background:#1E3A5F">40<small>%</small></span>
         <span style="width:30%;background:#396BAC">30<small>%</small></span>
         <span style="width:15%;background:#027A48">15<small>%</small></span>
         <span style="width:15%;background:#B54708">15<small>%</small></span>
       </div>
-      <div class="wkey">
+      <div class="wkey" style="margin-top:18px">
         <b><i style="background:#1E3A5F"></i>출처 가중치 평균</b>
         <b><i style="background:#396BAC"></i>독립 출처 수 비율</b>
         <b><i style="background:#027A48"></i>도메인 다양성</b>
         <b><i style="background:#B54708"></i>1차 공식 자료 보너스</b>
       </div>
     </div>
-    <p class="lede reveal" style="margin-top:44px">정부기관 · 법원 · 통계청 · 선관위 · 전자공시 같은 <b>1차 공식 자료</b>는<br>2차 언론 기사보다 최우선 대조군으로 배정합니다.</p>
-    <span class="folio">16</span>
+    <span class="folio">15</span>
   </div>
 </section>
+
 
 <!-- ══════════════════════════════════════════
      17 · 섹션 — 주요 기능
@@ -804,31 +752,6 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
   </div>
 </section>
 
-<!-- ══════════════════════════════════════════
-     18 · 화면 구성 개요
-     ══════════════════════════════════════════ -->
-<section class="slide">
-  <div class="pad">
-    <div class="masthead">
-      <span class="wordmark">Fake News Defender</span>
-      <span class="dateline">주요 기능</span>
-    </div>
-    <div class="stack">
-      <div class="kicker reveal">화면 구성</div>
-      <h2 class="head reveal">링크를 한 번 넣으면<br>세 화면이 <em>자동으로 이어집니다.</em></h2>
-      <div class="ba reveal" style="margin-top:40px">
-        <div class="band" style="border-left-color:#1E3A5F">
-          <div class="flow">
-            <span class="step">랜딩 — 링크 입력</span><span class="arw">→</span>
-            <span class="step">분석 — 본문 스캔</span><span class="arw">→</span>
-            <span class="step">대시보드 — 결과와 기록</span>
-          </div>
-        </div>
-      </div>
-    </div>
-    <span class="folio">18</span>
-  </div>
-</section>
 
 <!-- ══════════════════════════════════════════
      19 · 랜딩 화면
@@ -839,52 +762,25 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
       <span class="wordmark">Fake News Defender</span>
       <span class="dateline">주요 기능 · 시연</span>
     </div>
-    <div class="kicker reveal" style="margin-top:32px">화면 01 — 랜딩</div>
+    <div class="kicker reveal" style="margin-top:32px">화면 01 · 02 — 랜딩과 분석</div>
     <div class="demo reveal">
       <div class="feat">
-        <p><b>계단식 진입 애니메이션</b> — 문구와 입력창이 순서대로 떠오릅니다</p>
         <p><b>링크 전용 입력</b> — 일반 문장은 <b>서버로 보내지 않고</b> 화면 안에서 알립니다</p>
-        <p><b>Top 5 티커</b> — 가장 많이 검증된 기사가 <b>4초마다</b> 한 칸씩</p>
-        <p><b>다섯 단계 페이드</b> — 1위는 크고 굵게, 아래로 갈수록 흐리게</p>
-        <p><b>hover 일시정지</b> — 읽는 도중 화면이 바뀌지 않습니다</p>
-        <p><b>반응형 문구</b> — 좁은 화면에서 안내 문구와 줄바꿈이 바뀝니다</p>
+        <p><b>Top 5 티커</b> — 가장 많이 검증된 기사가 <b>4초마다</b> 한 칸씩, hover하면 멈춥니다</p>
+        <p><b>출처명 표시</b> — 페이지 메타데이터에서 매체명을 읽어 옵니다</p>
+        <p><b>본문 스캔</b> — <b>실제 수집한 기사</b>가 1.7초마다 한 문단씩 올라갑니다</p>
+        <p><b>분석 중인 문단만 진하게</b> — 문단 높이를 실측해 정확히 한 칸씩 정렬합니다</p>
+        <p><b>반응형</b> — 좁은 화면에서 안내 문구와 줄바꿈이 바뀝니다</p>
       </div>
       <div class="shot">
         <div class="ic">SCREEN RECORDING</div>
-        <div class="cap">랜딩 화면 녹화<br>진입 → 오류 안내 → 티커 회전 → 모바일 폭</div>
+        <div class="cap">랜딩 → 오류 안내 → 티커 회전<br>→ 검증 → 본문 스캔 → 분석 완료</div>
       </div>
     </div>
     <span class="folio">19</span>
   </div>
-</section>
+  </section>
 
-<!-- ══════════════════════════════════════════
-     20 · 분석 로딩 화면
-     ══════════════════════════════════════════ -->
-<section class="slide">
-  <div class="pad">
-    <div class="masthead">
-      <span class="wordmark">Fake News Defender</span>
-      <span class="dateline">주요 기능 · 시연</span>
-    </div>
-    <div class="kicker reveal" style="margin-top:32px">화면 02 — 분석</div>
-    <div class="demo reveal">
-      <div class="feat">
-        <p><b>부드러운 전환</b> — 티커가 먼저 빠지고 분석 블록이 올라옵니다</p>
-        <p><b>출처명 표시</b> — 페이지 메타데이터에서 매체명을 읽어 옵니다</p>
-        <p><b>본문 스캔</b> — <b>실제 수집한 기사</b>가 1.7초마다 한 문단씩</p>
-        <p><b>분석 중인 문단만 진하게</b> — 지금 읽는 위치를 보여줍니다</p>
-        <p><b>문단 높이 실측 정렬</b> — 고정 픽셀이 아니라 <b>실제 위치를 재서</b> 맞춥니다</p>
-        <p><b>위아래 페이드</b> — 문단이 잘려 보이지 않습니다</p>
-      </div>
-      <div class="shot">
-        <div class="ic">SCREEN RECORDING</div>
-        <div class="cap">분석 로딩 화면 녹화<br>전환 → 본문 스캔 10초 → 완료 → 대시보드</div>
-      </div>
-    </div>
-    <span class="folio">20</span>
-  </div>
-</section>
 
 <!-- ══════════════════════════════════════════
      21 · 대시보드 상단
@@ -895,52 +791,25 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
       <span class="wordmark">Fake News Defender</span>
       <span class="dateline">주요 기능 · 시연</span>
     </div>
-    <div class="kicker reveal" style="margin-top:32px">화면 03 — 대시보드 상단</div>
+    <div class="kicker reveal" style="margin-top:32px">화면 03 · 04 — 대시보드와 정밀 진단 레포트</div>
     <div class="demo reveal">
       <div class="feat">
-        <p><b>고정 마스트헤드</b> — 스크롤해도 상단에 남습니다</p>
-        <p><b>헤드라인 티커</b> — 가장 많이 검증된 기사 Top 5가 4초마다</p>
-        <p><b>클릭 시 레포트 열림</b> — 신문 1면 헤드라인처럼 동작합니다</p>
-        <p><b>제호 → 홈</b> — 좁은 화면에서는 홈 아이콘으로 바뀝니다</p>
-        <p><b>대시보드 내 검증</b> — 같은 자리에서 바로 다음 링크를</p>
+        <p><b>헤드라인 티커</b> — 가장 많이 검증된 기사 Top 5가 마스트헤드에서 4초마다</p>
         <p><b>3단계 스테퍼</b> — 본문 수집 · 교차 검색 · 사실 검증</p>
-      </div>
-      <div class="shot">
-        <div class="ic">SCREEN RECORDING</div>
-        <div class="cap">마스트헤드 녹화<br>티커 → 홈 복귀 → 검증 → 스테퍼 진행</div>
-      </div>
-    </div>
-    <span class="folio">21</span>
-  </div>
-</section>
-
-<!-- ══════════════════════════════════════════
-     22 · 정밀 진단 레포트
-     ══════════════════════════════════════════ -->
-<section class="slide">
-  <div class="pad">
-    <div class="masthead">
-      <span class="wordmark">Fake News Defender</span>
-      <span class="dateline">주요 기능 · 시연</span>
-    </div>
-    <div class="kicker reveal" style="margin-top:32px">화면 04 — 정밀 진단 레포트</div>
-    <div class="demo reveal">
-      <div class="feat">
         <p><b>자동 스크롤</b> — 검증 직후와 히스토리 클릭이 <b>같게</b> 동작합니다</p>
         <p><b>결론이 맨 위</b> — 판정 → 모순율 → 막대 → 제목 → 데이트라인</p>
-        <p><b>모순율은 불일치 정도</b> — <span class="ac-f">진실일 확률이 아닙니다</span></p>
         <p><b>요소별 세부 검증</b> — 주장을 <b>하나씩</b> 진실 · 거짓 · 판단유보로</p>
-        <p><b>교차 검증 출처</b> — 참고문헌 형식으로 번호를 붙여 제시</p>
-        <p><b>공동 팩트체크</b> — 익명 토큰으로 본인 댓글만 삭제</p>
+        <p><b>교차 검증 출처 · 공동 팩트체크</b> — 근거를 번호로 제시하고 의견을 남깁니다</p>
       </div>
       <div class="shot">
         <div class="ic">SCREEN RECORDING</div>
-        <div class="cap">레포트 녹화<br>자동 스크롤 → 세부 검증 → 출처 → 댓글 → 닫기</div>
+        <div class="cap">마스트헤드 티커 → 검증 → 스테퍼<br>→ 자동 스크롤 → 세부 검증 → 출처</div>
       </div>
     </div>
-    <span class="folio">22</span>
+    <span class="folio">20</span>
   </div>
-</section>
+  </section>
+
 
 <!-- ══════════════════════════════════════════
      23 · 통계 · 랭킹 · 히스토리
@@ -1063,6 +932,7 @@ class SlidePresentation {
     this.setupKeyboardNav();
     this.setupTouchNav();
     this.setupWheelNav();
+    this.numberFolios();
     this.showSlide(0);
   }
 
@@ -1117,6 +987,13 @@ class SlidePresentation {
 
   next(){ this.showSlide(this.current + 1); }
   prev(){ this.showSlide(this.current - 1); }
+
+  numberFolios(){
+    this.slides.forEach((s, idx) => {
+      const f = s.querySelector('.folio');
+      if (f) f.textContent = String(idx + 1).padStart(2, '0');
+    });
+  }
 
   showSlide(i){
     this.current = Math.max(0, Math.min(i, this.slides.length - 1));
