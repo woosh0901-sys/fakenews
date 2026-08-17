@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720"
+     role="img" aria-label="Fake News Defender 동작 구조. 사용자가 브라우저에 뉴스 링크를 넣으면 Vercel 서버가 대상 기사 본문을 가져오고, 네이버 뉴스와 DuckDuckGo에서 비교할 실제 뉴스를 검색한 뒤, Google Gemini가 두 글을 대조해 판정한다. 결과는 Supabase에 저장되어 브라우저로 돌아가며, 최근 검사한 기사는 저장된 결과로 즉시 응답한다."
+     font-family="'Helvetica Neue', Helvetica, Arial, 'SUIT Variable', SUIT, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif">
+  <title>Fake News Defender 동작 구조</title>
+
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#0F172A"/>
+    </marker>
+    <marker id="ar-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#396BAC"/>
+    </marker>
+  </defs>
+
+  <rect width="1280" height="720" fill="#FFFFFF"/>
+
+  <!-- 제목 -->
+  <text x="640" y="76" font-size="27" font-weight="800" fill="#0F172A" text-anchor="middle" letter-spacing="-0.02em">Fake News Defender — 동작 구조</text>
+  <text x="640" y="108" font-size="14.5" fill="#64748B" text-anchor="middle">링크 하나를 넣으면, 서버가 실제 뉴스를 찾아 대조한 뒤 진짜인지 가짜인지 알려 줍니다</text>
+
+  <!-- ② 검증 대상 기사 -->
+  <rect x="336" y="160" width="240" height="84" fill="#FFFFFF" stroke="#0F172A" stroke-width="1.4"/>
+  <circle cx="358" cy="160" r="14" fill="#FFFFFF" stroke="#0F172A" stroke-width="1.4"/>
+  <text x="358" y="165" font-size="14" font-weight="700" fill="#0F172A" text-anchor="middle">2</text>
+  <text x="456" y="200" font-size="18" font-weight="700" fill="#0F172A" text-anchor="middle">검증 대상 기사</text>
+  <text x="456" y="226" font-size="13.5" fill="#64748B" text-anchor="middle">뉴스 · Instagram · X</text>
+  <line x1="456" y1="244" x2="456" y2="294" stroke="#0F172A" stroke-width="1.4" marker-end="url(#ar)"/>
+  <text x="470" y="276" font-size="13.5" fill="#64748B">본문 가져오기</text>
+
+  <!-- ① 브라우저 -->
+  <rect x="60" y="300" width="190" height="140" fill="#FFFFFF" stroke="#0F172A" stroke-width="1.4"/>
+  <circle cx="82" cy="300" r="14" fill="#FFFFFF" stroke="#0F172A" stroke-width="1.4"/>
+  <text x="82" y="305" font-size="14" font-weight="700" fill="#0F172A" text-anchor="middle">1</text>
+  <text x="155" y="358" font-size="18" font-weight="700" fill="#0F172A" text-anchor="middle">브라우저</text>
+  <text x="155" y="388" font-size="13.5" fill="#64748B" text-anchor="middle">사용자가 뉴스 링크를</text>
+  <text x="155" y="408" font-size="13.5" fill="#64748B" text-anchor="middle">붙여넣습니다</text>
+
+  <!-- 서버 (허브) -->
+  <rect x="336" y="300" width="240" height="140" fill="#FFFFFF" stroke="#0F172A" stroke-width="2.5"/>
+  <text x="456" y="358" font-size="18" font-weight="700" fill="#0F172A" text-anchor="middle">Vercel</text>
+  <text x="456" y="388" font-size="13.5" fill="#64748B" text-anchor="middle">Fake News Defender</text>
+  <text x="456" y="408" font-size="13.5" fill="#64748B" text-anchor="middle">서버</text>
+
+  <!-- ③ 실시간 검색 -->
+  <rect x="662" y="300" width="230" height="140" fill="#FFFFFF" stroke="#0F172A" stroke-width="1.4"/>
+  <circle cx="684" cy="300" r="14" fill="#FFFFFF" stroke="#0F172A" stroke-width="1.4"/>
+  <text x="684" y="305" font-size="14" font-weight="700" fill="#0F172A" text-anchor="middle">3</text>
+  <text x="777" y="352" font-size="18" font-weight="700" fill="#0F172A" text-anchor="middle">네이버 뉴스</text>
+  <text x="777" y="378" font-size="18" font-weight="700" fill="#0F172A" text-anchor="middle">DuckDuckGo</text>
+  <text x="777" y="408" font-size="13.5" fill="#64748B" text-anchor="middle">비교할 실제 뉴스를 찾습니다</text>
+
+  <!-- ④ Gemini -->
+  <rect x="978" y="300" width="240" height="140" fill="#FFFFFF" stroke="#0F172A" stroke-width="1.4"/>
+  <circle cx="1000" cy="300" r="14" fill="#FFFFFF" stroke="#0F172A" stroke-width="1.4"/>
+  <text x="1000" y="305" font-size="14" font-weight="700" fill="#0F172A" text-anchor="middle">4</text>
+  <text x="1098" y="358" font-size="18" font-weight="700" fill="#0F172A" text-anchor="middle">Google Gemini</text>
+  <text x="1098" y="388" font-size="13.5" fill="#64748B" text-anchor="middle">두 글을 대조해</text>
+  <text x="1098" y="408" font-size="13.5" fill="#64748B" text-anchor="middle">판정합니다</text>
+
+  <!-- 가로 흐름 -->
+  <line x1="250" y1="370" x2="330" y2="370" stroke="#0F172A" stroke-width="1.4" marker-end="url(#ar)"/>
+  <text x="290" y="360" font-size="13.5" fill="#64748B" text-anchor="middle">뉴스 링크</text>
+  <line x1="576" y1="370" x2="656" y2="370" stroke="#0F172A" stroke-width="1.4" marker-end="url(#ar)"/>
+  <text x="616" y="360" font-size="13.5" fill="#64748B" text-anchor="middle">검색어</text>
+  <line x1="892" y1="370" x2="972" y2="370" stroke="#0F172A" stroke-width="1.4" marker-end="url(#ar)"/>
+  <text x="932" y="360" font-size="13.5" fill="#64748B" text-anchor="middle">관련 기사</text>
+
+  <!-- ⑤ Supabase -->
+  <rect x="336" y="530" width="240" height="100" fill="#FFFFFF" stroke="#0F172A" stroke-width="1.4"/>
+  <circle cx="358" cy="530" r="14" fill="#FFFFFF" stroke="#0F172A" stroke-width="1.4"/>
+  <text x="358" y="535" font-size="14" font-weight="700" fill="#0F172A" text-anchor="middle">5</text>
+  <text x="456" y="572" font-size="18" font-weight="700" fill="#0F172A" text-anchor="middle">Supabase</text>
+  <text x="456" y="600" font-size="13.5" fill="#64748B" text-anchor="middle">검증 기록 · 통계 저장</text>
+
+  <line x1="400" y1="440" x2="400" y2="524" stroke="#0F172A" stroke-width="1.4" marker-end="url(#ar)"/>
+  <text x="388" y="488" font-size="13.5" fill="#64748B" text-anchor="end">결과 저장</text>
+
+  <!-- 캐시 단축 경로 -->
+  <line x1="500" y1="524" x2="500" y2="446" stroke="#396BAC" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#ar-a)"/>
+  <text x="514" y="488" font-size="13.5" font-weight="700" fill="#396BAC">최근에 검사한 기사면 저장된 결과로 바로 응답</text>
+
+  <!-- 결과 반환 -->
+  <polyline points="1098,440 1098,672 155,672 155,446" fill="none" stroke="#0F172A" stroke-width="1.4" marker-end="url(#ar)"/>
+  <text x="640" y="662" font-size="15" font-weight="700" fill="#0F172A" text-anchor="middle">진짜 · 가짜 · 의심 판정과 그 근거</text>
+</svg>

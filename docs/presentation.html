@@ -1,0 +1,1191 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fake News Defender — 공학경진대회 발표</title>
+
+<!-- ===========================================
+     FONTS — 프로젝트와 동일한 조판
+     영문·숫자 = Helvetica (unicode-range로 라틴만 담당)
+     한글       = SUIT (라틴 범위 밖은 SUIT로 확정 폴백)
+     =========================================== -->
+<style>
+/* SUIT Variable — CDN 우선, 오프라인이면 로컬 설치본(SUIT)으로 폴백 */
+@font-face{
+  font-family:'SUIT Variable'; font-weight:100 900; font-display:swap;
+  src:url('https://cdn.jsdelivr.net/gh/sun-typeface/SUIT@2/fonts/variable/woff2/SUIT-Variable.woff2') format('woff2-variations');
+}
+/* 라틴 문자만 Helvetica로 매핑하는 전용 패밀리 (프로젝트 index.css와 동일) */
+@font-face{
+  font-family:"Latin Helvetica";
+  src:local("Helvetica Neue"),local("HelveticaNeue"),local("Helvetica"),local("Arial");
+  font-weight:100 500;
+  unicode-range:U+0000-024F,U+2000-206F,U+20A0-20CF,U+2100-218F,U+FB00-FB06;
+}
+@font-face{
+  font-family:"Latin Helvetica";
+  src:local("Helvetica Neue Medium"),local("HelveticaNeue-Medium"),local("Arial");
+  font-weight:500 600;
+  unicode-range:U+0000-024F,U+2000-206F,U+20A0-20CF,U+2100-218F,U+FB00-FB06;
+}
+@font-face{
+  font-family:"Latin Helvetica";
+  src:local("Helvetica Neue Bold"),local("HelveticaNeue-Bold"),local("Helvetica Bold"),local("Arial Bold");
+  font-weight:600 900;
+  unicode-range:U+0000-024F,U+2000-206F,U+20A0-20CF,U+2100-218F,U+FB00-FB06;
+}
+
+/* ===========================================
+   THEME — 제품이 실제로 쓰는 디자인 토큰
+   =========================================== */
+:root{
+  --stage-bg:#1A1A1A;
+  --slide-bg:#FFFFFF;
+  --paper:#FFFFFF;
+  --ink:#0F172A;          /* neutral-900 */
+  --body:#334155;         /* neutral-700 */
+  --mute:#64748B;         /* neutral-500 */
+  --faint:#CBD5E1;        /* neutral-300 */
+  --hair:#E2E8F0;         /* neutral-200 */
+  --navy:#1E3A5F;         /* brand-500 */
+  --navy-l:#396BAC;       /* brand-400 */
+  --real:#027A48;         /* success-700 */
+  --fake:#B42318;         /* error-700  */
+  --susp:#B54708;         /* warning-700 */
+
+  --font:"Latin Helvetica","SUIT Variable",SUIT,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+
+  --pad-x:104px;
+  --ease:cubic-bezier(.16,1,.3,1);
+  --dur:.72s;
+}
+
+*{ margin:0; padding:0; box-sizing:border-box; }
+
+/* ===========================================
+   FIXED 16:9 STAGE — viewport-base.css (전문)
+   =========================================== */
+html, body { width:100%; height:100%; margin:0; overflow:hidden; background:var(--stage-bg,#000); }
+.deck-viewport { position:fixed; inset:0; overflow:hidden; background:var(--stage-bg,#000); }
+.deck-stage { position:absolute; left:0; top:0; width:1920px; height:1080px; overflow:hidden; transform-origin:0 0; background:var(--slide-bg,#fff); }
+.slide { position:absolute; inset:0; width:1920px; height:1080px; overflow:hidden; display:block; visibility:hidden; opacity:0; pointer-events:none; background:var(--slide-bg,#fff); }
+.slide.active, .slide.visible { visibility:visible; opacity:1; pointer-events:auto; z-index:1; }
+img, video, canvas, svg { max-width:100%; max-height:100%; }
+.deck-controls { position:fixed; left:50%; bottom:22px; transform:translateX(-50%); z-index:1000; }
+@media print{
+  html,body{ width:1920px; height:auto; overflow:visible; background:#fff; }
+  .deck-viewport{ position:static; overflow:visible; background:#fff; }
+  .deck-stage{ position:static; width:auto; height:auto; transform:none !important; background:none; }
+  .slide{ position:relative; display:block !important; visibility:visible !important; opacity:1 !important; pointer-events:auto !important; width:1920px; height:1080px; break-after:page; page-break-after:always; }
+  .slide:last-child{ break-after:auto; page-break-after:auto; }
+  .deck-controls{ display:none !important; }
+}
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{ animation-duration:.01ms !important; transition-duration:.2s !important; }
+}
+
+/* ===========================================
+   TYPOGRAPHY BASE
+   =========================================== */
+body{ font-family:var(--font); color:var(--ink); -webkit-font-smoothing:antialiased; }
+.slide{ font-family:var(--font); }
+
+/* ===========================================
+   SLIDE CHROME — 제호 괘선 · 쪽 번호
+   =========================================== */
+.pad{ position:absolute; inset:0; padding:60px var(--pad-x) 68px; display:flex; flex-direction:column; }
+
+.masthead{ display:flex; justify-content:space-between; align-items:flex-end;
+  padding-bottom:14px; border-bottom:2px solid var(--ink); flex-shrink:0; }
+.wordmark{ font-size:25px; font-weight:900; letter-spacing:-.01em;
+  text-transform:uppercase; color:var(--navy); }
+.dateline{ font-size:17px; font-weight:500; letter-spacing:.16em;
+  text-transform:uppercase; color:var(--mute); font-variant-numeric:tabular-nums; }
+
+.folio{ position:absolute; right:var(--pad-x); bottom:30px;
+  font-size:17px; font-weight:700; letter-spacing:.14em; color:var(--faint);
+  font-variant-numeric:tabular-nums; }
+
+/* --- 커커: 제품의 섹션 라벨과 같은 문법 --- */
+.kicker{ font-size:20px; font-weight:800; letter-spacing:.28em; color:var(--mute); }
+.kicker.ink{ color:var(--ink); }
+
+/* --- 슬라이드 제목 --- */
+h2.head{ margin-top:14px; font-size:74px; font-weight:800; line-height:1.24;
+  letter-spacing:-.035em; color:var(--ink); max-width:1500px; }
+h2.head em{ font-style:normal; color:var(--navy-l); }
+
+.lede{ margin-top:26px; font-size:31px; font-weight:400; line-height:1.72;
+  color:var(--body); max-width:1180px; }
+
+.stack{ flex:1; display:flex; flex-direction:column; justify-content:center; }
+
+/* ===========================================
+   S1 · TITLE — 제품의 정밀 진단 레포트를 슬라이드 크기로
+   =========================================== */
+.t-kicker{ margin-top:46px; }
+.verdict{ margin-top:20px; display:flex; align-items:flex-end; justify-content:space-between; gap:60px; }
+.vword{ font-size:172px; font-weight:900; line-height:.9; letter-spacing:-.055em; color:var(--fake); }
+.vrate{ text-align:right; flex-shrink:0; }
+.vrate .lab{ font-size:19px; font-weight:800; letter-spacing:.24em; color:var(--mute); }
+.vrate .num{ margin-top:8px; font-size:128px; font-weight:900; line-height:.86;
+  letter-spacing:-.045em; color:var(--fake); font-variant-numeric:tabular-nums; }
+.vrate .num s{ text-decoration:none; font-size:58px; vertical-align:super; }
+.meter{ margin-top:28px; height:6px; width:100%; background:var(--hair); }
+.meter i{ display:block; height:100%; width:94%; background:var(--fake);
+  transform:scaleX(0); transform-origin:0 50%; }
+.slide.visible .meter i{ animation:meter 1.1s var(--ease) .66s forwards; }
+@keyframes meter{ to{ transform:scaleX(1); } }
+
+.t-title{ margin-top:48px; font-size:76px; font-weight:800; line-height:1.28;
+  letter-spacing:-.035em; max-width:1500px; }
+.t-stand{ margin-top:24px; padding-left:24px; border-left:3px solid var(--fake);
+  font-size:29px; line-height:1.7; color:var(--body); max-width:1180px; }
+
+.legend{ margin-top:auto; padding-top:20px; border-top:1px solid var(--hair);
+  display:flex; align-items:center; gap:44px; }
+.leg{ display:flex; align-items:center; gap:11px; font-size:21px; font-weight:800; letter-spacing:.12em; }
+.leg i{ display:block; width:28px; height:5px; }
+.leg.a{ color:var(--real); } .leg.a i{ background:var(--real); }
+.leg.b{ color:var(--fake); } .leg.b i{ background:var(--fake); }
+.leg.c{ color:var(--susp); } .leg.c i{ background:var(--susp); }
+.legend .who{ margin-left:auto; font-size:19px; font-weight:500;
+  letter-spacing:.14em; color:var(--mute); }
+
+/* ===========================================
+   SECTION DIVIDERS
+   =========================================== */
+.sec{ background:var(--ink); }
+.sec .pad{ justify-content:center; }
+.sec .masthead{ border-bottom-color:rgba(255,255,255,.28); }
+.sec .wordmark{ color:#fff; } .sec .dateline{ color:rgba(255,255,255,.55); }
+.sec .folio{ color:rgba(255,255,255,.32); }
+.sec-num{ font-size:250px; font-weight:900; line-height:.82; letter-spacing:-.06em; color:var(--navy-l); }
+.sec-name{ margin-top:18px; font-size:104px; font-weight:800; letter-spacing:-.04em; color:#fff; }
+.sec-note{ margin-top:26px; font-size:29px; font-weight:400; color:rgba(255,255,255,.62); max-width:1080px; line-height:1.65; }
+.sec-rule{ margin-top:40px; width:280px; height:6px; background:var(--navy-l); }
+
+/* ===========================================
+   COMPONENTS — 괘선 문법으로 통일 (카드·그림자 없음)
+   =========================================== */
+/* 번호 목록 */
+.list{ margin-top:40px; }
+.list .row{ display:grid; grid-template-columns:96px 1fr; gap:34px; align-items:baseline;
+  padding:26px 0; border-top:1px solid var(--hair); }
+.list .row:last-child{ border-bottom:1px solid var(--hair); }
+.list .n{ font-size:38px; font-weight:900; color:var(--faint); font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
+.list .t{ font-size:38px; font-weight:800; letter-spacing:-.02em; color:var(--ink); }
+.list .d{ margin-top:8px; font-size:26px; font-weight:400; line-height:1.62; color:var(--mute); }
+
+/* 2단 대비 */
+.duo{ margin-top:44px; display:grid; grid-template-columns:1fr 1fr; gap:0; }
+.duo > div{ padding:34px 46px; border-top:5px solid var(--ink); }
+.duo > div + div{ border-left:1px solid var(--hair); }
+.duo .cap{ font-size:20px; font-weight:800; letter-spacing:.2em; color:var(--mute); }
+.duo.split > div:first-child{ border-top-color:var(--navy); }
+.duo.split > div:last-child{ border-top-color:var(--susp); }
+.duo .items{ margin-top:24px; }
+.duo .items p{ padding:15px 0; border-bottom:1px solid var(--hair);
+  font-size:29px; font-weight:500; color:var(--ink); letter-spacing:-.01em; }
+
+/* 표 */
+.spec{ margin-top:44px; width:100%; border-collapse:collapse; }
+.spec tr{ border-bottom:1px solid var(--hair); }
+.spec tr:first-child{ border-top:3px solid var(--ink); }
+.spec th{ text-align:left; padding:24px 0; width:340px; vertical-align:top;
+  font-size:21px; font-weight:800; letter-spacing:.18em; color:var(--mute); }
+.spec td{ padding:24px 0; font-size:33px; font-weight:600; color:var(--ink); letter-spacing:-.015em; }
+.spec td small{ display:block; margin-top:7px; font-size:24px; font-weight:400; color:var(--mute); letter-spacing:0; }
+
+/* 큰 수치 */
+.figs{ margin-top:46px; display:flex; gap:0; border-top:3px solid var(--ink); }
+.figs div{ flex:1; padding:32px 40px; }
+.figs div + div{ border-left:1px solid var(--hair); }
+.figs .v{ font-size:96px; font-weight:900; line-height:.9; letter-spacing:-.05em;
+  color:var(--ink); font-variant-numeric:tabular-nums; }
+.figs .k{ margin-top:14px; font-size:23px; font-weight:700; color:var(--mute); letter-spacing:.06em; }
+
+/* before / after */
+.ba{ margin-top:40px; }
+.ba .band{ padding:30px 0 30px 40px; border-left:6px solid var(--faint); }
+.ba .band + .band{ margin-top:26px; border-left-color:var(--navy-l); }
+.ba .lbl{ font-size:20px; font-weight:800; letter-spacing:.2em; color:var(--mute); }
+.ba .band + .band .lbl{ color:var(--navy-l); }
+.ba .flow{ margin-top:16px; display:flex; align-items:center; gap:18px; flex-wrap:wrap; }
+.ba .step{ font-size:28px; font-weight:700; color:var(--ink); letter-spacing:-.01em;
+  border:2px solid var(--ink); padding:12px 22px; }
+.ba .band + .band .step.hot{ border-color:var(--navy-l); color:var(--navy-l); }
+.ba .arw{ font-size:26px; color:var(--faint); font-weight:700; }
+.ba .note{ margin-top:14px; font-size:25px; color:var(--mute); line-height:1.6; }
+
+/* 가중치 막대 */
+.weights{ margin-top:46px; }
+.wbar{ display:flex; height:64px; width:100%; border:3px solid var(--ink); }
+.wbar span{ display:flex; align-items:center; justify-content:center;
+  font-size:25px; font-weight:800; color:#fff; letter-spacing:.02em; }
+.wbar span + span{ border-left:3px solid var(--ink); }
+.wkey{ margin-top:26px; display:flex; gap:40px; flex-wrap:wrap; }
+.wkey b{ display:flex; align-items:center; gap:12px; font-size:26px; font-weight:600; color:var(--body); }
+.wkey b i{ width:24px; height:24px; display:block; }
+
+/* 대조 카드 (제목 유사 / 주장 반대) */
+.versus{ margin-top:56px; display:grid; grid-template-columns:1fr 120px 1fr; align-items:center; gap:0; }
+.vs-card{ border-top:6px solid var(--ink); padding:36px 44px; }
+.vs-card.a{ border-top-color:var(--real); }
+.vs-card.b{ border-top-color:var(--fake); }
+.vs-card .h{ font-size:44px; font-weight:800; letter-spacing:-.025em; color:var(--ink); line-height:1.35; }
+.vs-card .m{ margin-top:18px; font-size:24px; font-weight:700; letter-spacing:.14em; }
+.vs-card.a .m{ color:var(--real); } .vs-card.b .m{ color:var(--fake); }
+.vs-mid{ text-align:center; font-size:34px; font-weight:900; color:var(--faint); letter-spacing:.1em; }
+
+/* 원칙 한 줄 */
+.axiom{ font-size:88px; font-weight:800; line-height:1.34; letter-spacing:-.04em;
+  color:var(--ink); max-width:1560px; }
+.axiom em{ font-style:normal; color:var(--navy-l); }
+
+/* 다이어그램 감싸개 */
+.figure{ margin-top:30px; flex:1; display:flex; align-items:center; justify-content:center; }
+.figure svg{ width:100%; height:auto; max-height:800px; }
+
+/* 시연 슬라이드: 좌측 기능 목록 + 우측 화면 자리 */
+.demo{ margin-top:34px; flex:1; display:grid; grid-template-columns:640px 1fr; gap:64px; align-items:start; }
+.demo .feat{ }
+.demo .feat p{ padding:17px 0; border-bottom:1px solid var(--hair);
+  font-size:27px; font-weight:500; line-height:1.5; color:var(--ink); letter-spacing:-.01em; }
+.demo .feat p b{ font-weight:800; }
+.demo .feat p:first-child{ border-top:3px solid var(--ink); }
+.demo .shot{ height:560px; border:3px solid var(--ink); display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:16px; background:#FAFBFC; }
+.demo .shot .ic{ font-size:23px; font-weight:800; letter-spacing:.22em; color:var(--faint); }
+.demo .shot .cap{ font-size:25px; font-weight:600; color:var(--mute); text-align:center; line-height:1.6; padding:0 40px; }
+
+/* 2×2 사분면 */
+.quad{ margin-top:44px; display:grid; grid-template-columns:1fr 1fr; gap:0; }
+.quad > div{ padding:34px 46px 38px; border-top:5px solid var(--ink); }
+.quad > div:nth-child(2), .quad > div:nth-child(4){ border-left:1px solid var(--hair); }
+.quad > div:nth-child(3), .quad > div:nth-child(4){ margin-top:34px; }
+.quad > div:nth-child(1){ border-top-color:var(--real); }
+.quad > div:nth-child(2){ border-top-color:var(--navy); }
+.quad > div:nth-child(3){ border-top-color:var(--susp); }
+.quad > div:nth-child(4){ border-top-color:var(--fake); }
+.quad .qn{ font-size:20px; font-weight:800; letter-spacing:.2em; color:var(--mute); }
+.quad .qt{ margin-top:12px; font-size:42px; font-weight:800; letter-spacing:-.025em; color:var(--ink); }
+.quad .qd{ margin-top:14px; font-size:25px; font-weight:400; line-height:1.65; color:var(--body); }
+
+/* 마무리 */
+.end{ text-align:center; }
+.end .big{ font-size:92px; font-weight:800; line-height:1.36; letter-spacing:-.04em; }
+.end .big em{ font-style:normal; color:var(--navy-l); }
+.end .sub{ margin-top:36px; font-size:29px; color:var(--mute); letter-spacing:.02em; }
+
+/* ===========================================
+   MOTION — 한 번의 잘 짜인 로드
+   =========================================== */
+.reveal{ opacity:0; transform:translateY(28px);
+  transition:opacity var(--dur) var(--ease), transform var(--dur) var(--ease); }
+.slide.visible .reveal{ opacity:1; transform:none; }
+.slide.visible .reveal:nth-child(1){ transition-delay:.05s; }
+.slide.visible .reveal:nth-child(2){ transition-delay:.13s; }
+.slide.visible .reveal:nth-child(3){ transition-delay:.21s; }
+.slide.visible .reveal:nth-child(4){ transition-delay:.29s; }
+.slide.visible .reveal:nth-child(5){ transition-delay:.37s; }
+.slide.visible .reveal:nth-child(6){ transition-delay:.45s; }
+.slide.visible .reveal:nth-child(7){ transition-delay:.53s; }
+.d0{ transition-delay:0s !important; }
+/* 제호 괘선은 좌→우로 그어진다 */
+.masthead{ transform:scaleX(0); transform-origin:0 50%; transition:transform .9s var(--ease); }
+.slide.visible .masthead{ transform:scaleX(1); }
+
+/* ===========================================
+   DECK CHROME — 진행 막대 · 편집 토글
+   =========================================== */
+.progress{ position:fixed; left:0; bottom:0; height:4px; background:var(--navy-l);
+  z-index:1000; transition:width .4s var(--ease); }
+.edit-hotzone{ position:fixed; top:0; left:0; width:80px; height:80px; z-index:10000; cursor:pointer; }
+.edit-toggle{ position:fixed; top:16px; left:16px; z-index:10001;
+  opacity:0; pointer-events:none; transition:opacity .3s ease;
+  background:var(--ink); color:#fff; border:0; padding:10px 14px;
+  font-family:var(--font); font-size:14px; font-weight:700; letter-spacing:.1em; cursor:pointer; }
+.edit-toggle.show, .edit-toggle.active{ opacity:1; pointer-events:auto; }
+.edit-toggle.active{ background:var(--fake); }
+[contenteditable="true"]{ outline:2px dashed var(--navy-l); outline-offset:4px; }
+</style>
+</head>
+<body>
+
+<div class="deck-viewport">
+<main class="deck-stage" id="deckStage">
+
+<!-- ══════════════════════════════════════════
+     01 · 표지
+     ══════════════════════════════════════════ -->
+<section class="slide title-slide active visible">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">2026 · 공학경진대회</span>
+    </div>
+    <div class="kicker t-kicker reveal">정밀 진단 레포트</div>
+    <div class="verdict">
+      <div class="vword reveal">가짜 뉴스</div>
+      <div class="vrate reveal"><div class="lab">주장 모순율</div><div class="num">94<s>%</s></div></div>
+    </div>
+    <div class="meter"><i></i></div>
+    <div class="t-title reveal">근거까지 보여주는 팩트체크</div>
+    <div class="t-stand reveal">기사의 주장을 하나씩 떼어 진실·거짓으로 분류하고,<br>그 판정을 뒷받침한 교차 출처를 함께 제시합니다.</div>
+    <div class="legend reveal">
+      <span class="leg a"><i></i>진짜</span>
+      <span class="leg b"><i></i>가짜</span>
+      <span class="leg c"><i></i>의심</span>
+      <span class="who">실시간 웹 RAG × Gemini LLM</span>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     02 · 섹션 — 제작 배경
+     ══════════════════════════════════════════ -->
+<section class="slide sec">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">01 / 04</span>
+    </div>
+    <div class="stack">
+      <div class="sec-num reveal">01</div>
+      <div class="sec-name reveal">제작 배경</div>
+      <div class="sec-note reveal">가짜뉴스를 자동으로 검증하려 할 때 마주치는 다섯 가지 기술적 함정과, 그것을 피하기 위해 세운 원칙.</div>
+      <div class="sec-rule reveal"></div>
+    </div>
+    <span class="folio">02</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     03 · 문제 진술
+     ══════════════════════════════════════════ -->
+<section class="slide">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">제작 배경</span>
+    </div>
+    <div class="stack">
+      <div class="kicker reveal">문제</div>
+      <h2 class="head reveal">가짜뉴스는 기사보다<br><em>SNS와 커뮤니티로</em> 더 빨리 퍼집니다.</h2>
+      <p class="lede reveal">그런데 이것을 자동으로 검증하려고 하면, 기술적으로 다섯 군데에서 걸려 넘어집니다.</p>
+    </div>
+    <span class="folio">03</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     04 · 기존 방식의 다섯 가지 한계
+     ══════════════════════════════════════════ -->
+<section class="slide">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">제작 배경</span>
+    </div>
+    <div class="kicker reveal" style="margin-top:38px">기존 방식은 왜 틀리는가</div>
+    <div class="list reveal">
+      <div class="row"><span class="n">01</span><div><div class="t">LLM 환각 및 과도한 추론 의존</div><div class="d">출처 개수 같은 통계 계산까지 모델에 맡기면, 지어낸 숫자가 그대로 지표가 됩니다.</div></div></div>
+      <div class="row"><span class="n">02</span><div><div class="t">보도자료 복제 기사 과다 계상</div><div class="d">통신사 송고문 하나를 수십 곳이 받아쓴 것을 독립 근거 수십 개로 셉니다.</div></div></div>
+      <div class="row"><span class="n">03</span><div><div class="t">제목만 유사하고 주장은 반대인 기사</div><div class="d">제목 유사도만 보면 정반대의 근거가 중복으로 묶입니다.</div></div></div>
+      <div class="row"><span class="n">04</span><div><div class="t">검색 메타데이터와 실제 본문 불일치</div><div class="d">낚시성 제목과 스니펫만으로는 관련성을 판별할 수 없습니다.</div></div></div>
+      <div class="row"><span class="n">05</span><div><div class="t">SSRF · 프롬프트 인젝션 취약성</div><div class="d">사용자가 넣은 URL을 그대로 크롤링하는 서비스는 그 자체가 공격 표면입니다.</div></div></div>
+    </div>
+    <span class="folio">04</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     05 · 한계 ③ 시각화
+     ══════════════════════════════════════════ -->
+<section class="slide">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">제작 배경</span>
+    </div>
+    <div class="stack">
+      <div class="kicker reveal">한계 03 — 제목은 닮았고, 주장은 반대다</div>
+      <div class="versus reveal">
+        <div class="vs-card a">
+          <div class="h">“○○기업, 반도체 투자 확대”</div>
+          <div class="m">근거 A</div>
+        </div>
+        <div class="vs-mid">VS</div>
+        <div class="vs-card b">
+          <div class="h">“○○기업, 반도체 투자 철회”</div>
+          <div class="m">근거 B</div>
+        </div>
+      </div>
+      <p class="lede reveal" style="margin-top:50px">제목 유사도만 계산하면 이 둘은 <b>같은 기사</b>로 묶여 하나가 버려집니다.<br>정반대의 사실이 검증에서 사라지는 것입니다.</p>
+    </div>
+    <span class="folio">05</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     06 · 해결 원칙
+     ══════════════════════════════════════════ -->
+<section class="slide">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">제작 배경</span>
+    </div>
+    <div class="stack">
+      <div class="kicker reveal">해결 원칙</div>
+      <div class="axiom reveal" style="margin-top:26px">객관적으로 계산할 수 있는 것은 <em>코드가 확정</em>하고,<br>사람이 읽어야 아는 것만 <em>모델에 맡긴다.</em></div>
+    </div>
+    <span class="folio">06</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     07 · 역할 분담
+     ══════════════════════════════════════════ -->
+<section class="slide">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">제작 배경</span>
+    </div>
+    <div class="kicker reveal" style="margin-top:38px">역할 분담</div>
+    <h2 class="head reveal" style="font-size:56px">무엇을 코드가 정하고, 무엇을 모델이 판단하는가</h2>
+    <div class="duo split reveal">
+      <div>
+        <div class="cap">PYTHON이 확정</div>
+        <div class="items">
+          <p>독립 출처 수</p>
+          <p>1차 공식 자료 포함 여부</p>
+          <p>근거 품질 점수</p>
+          <p>기사 간 중복 판정</p>
+        </div>
+      </div>
+      <div>
+        <div class="cap">LLM이 판단</div>
+        <div class="items">
+          <p>근거가 주장을 지지하는가 · 반박하는가</p>
+          <p>자료들끼리 서로 충돌하는가</p>
+          <p>개별 주장이 진실인가 · 거짓인가</p>
+          <p>판정 근거의 자연어 서술</p>
+        </div>
+      </div>
+    </div>
+    <span class="folio">07</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     08 · 섹션 — 적용 기술 및 구조
+     ══════════════════════════════════════════ -->
+<section class="slide sec">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">02 / 04</span>
+    </div>
+    <div class="stack">
+      <div class="sec-num reveal">02</div>
+      <div class="sec-name reveal">적용 기술 및 구조</div>
+      <div class="sec-note reveal">개발 환경과 배포 구조, 그리고 2단계 적응형 RAG 파이프라인.</div>
+      <div class="sec-rule reveal"></div>
+    </div>
+    <span class="folio">08</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     09 · 개발 환경
+     ══════════════════════════════════════════ -->
+<section class="slide">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">적용 기술</span>
+    </div>
+    <div class="kicker reveal" style="margin-top:38px">개발 환경</div>
+    <table class="spec reveal">
+      <tr><th>백엔드</th><td>Python 3 · FastAPI · Uvicorn<small>비동기 HTTP 클라이언트로 httpx 사용</small></td></tr>
+      <tr><th>프론트엔드</th><td>React 19 · Vite 8 · Tailwind CSS 4<small>Helvetica + SUIT 조판, 다크모드 없는 단일 지면</small></td></tr>
+      <tr><th>데이터베이스</th><td>Supabase — PostgreSQL · PostgREST<small>ORM 없이 REST 호출, 서버리스 커넥션 풀 문제 회피</small></td></tr>
+      <tr><th>로컬 실행</th><td>python backend_app.py / npm run dev<small>localhost:5173</small></td></tr>
+    </table>
+    <span class="folio">09</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     10 · 배포 환경
+     ══════════════════════════════════════════ -->
+<section class="slide">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">적용 기술</span>
+    </div>
+    <div class="kicker reveal" style="margin-top:38px">배포 환경</div>
+    <h2 class="head reveal" style="font-size:52px">저장소 하나에서 정적 빌드와 서버리스 함수가 함께 나갑니다</h2>
+    <div class="ba reveal" style="margin-top:30px">
+      <div class="band">
+        <div class="lbl">/API/(.*)</div>
+        <div class="flow"><span class="step">서버리스 함수</span><span class="arw">→</span><span class="step">FastAPI 앱</span><span class="arw">→</span><span class="step">팩트체크 파이프라인</span></div>
+      </div>
+      <div class="band">
+        <div class="lbl">그 외 모든 경로</div>
+        <div class="flow"><span class="step hot">정적 자산</span><span class="arw">→</span><span class="step hot">단일 페이지 앱</span></div>
+        <div class="note">파일시스템을 먼저 확인한 뒤 규칙을 적용하므로, 시연용 데모 페이지가 SPA 폴백보다 우선합니다.</div>
+      </div>
+    </div>
+    <div class="figs reveal" style="margin-top:26px">
+      <div><div class="v">60<span style="font-size:44px">초</span></div><div class="k">함수 최대 실행 시간</div></div>
+      <div><div class="v">1</div><div class="k">배포 대상 — Vercel 단일</div></div>
+      <div><div class="v">0</div><div class="k">관리 서버</div></div>
+    </div>
+    <span class="folio">10</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     11 · 개발 도구 및 언어
+     ══════════════════════════════════════════ -->
+<section class="slide">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">적용 기술</span>
+    </div>
+    <div class="kicker reveal" style="margin-top:38px">개발 도구 및 언어</div>
+    <div class="duo reveal">
+      <div>
+        <div class="cap">개발 언어</div>
+        <div class="items">
+          <p>Python 3 — 백엔드 · 파이프라인</p>
+          <p>JavaScript · JSX — 프론트엔드</p>
+          <p>SQL — Supabase 스키마 DDL</p>
+          <p>CSS — 디자인 토큰</p>
+        </div>
+      </div>
+      <div>
+        <div class="cap">개발 도구</div>
+        <div class="items">
+          <p>Git · GitHub — 풀 리퀘스트 기반 협업</p>
+          <p>Vite — 개발 서버 · 핫 모듈 교체</p>
+          <p>oxlint — 정적 분석</p>
+          <p>unittest — 자동화 테스트</p>
+        </div>
+      </div>
+    </div>
+    <div class="figs reveal">
+      <div><div class="v">33</div><div class="k">단위 · 통합 테스트</div></div>
+      <div><div class="v">9</div><div class="k">보안</div></div>
+      <div><div class="v">14</div><div class="k">RAG 파이프라인</div></div>
+      <div><div class="v">10</div><div class="k">백엔드 · 검색 API</div></div>
+    </div>
+    <span class="folio">11</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     12 · 전체 구조 다이어그램
+     ══════════════════════════════════════════ -->
+<section class="slide">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">적용 기술</span>
+    </div>
+    <div class="kicker reveal" style="margin-top:34px">전체 구조</div>
+    <div class="figure reveal">
+      <svg viewBox="0 0 1280 620" role="img" aria-label="브라우저에서 입력한 링크가 Vercel 서버를 거쳐 대상 기사 수집, 네이버·DuckDuckGo 검색, Gemini 대조 판정, Supabase 저장을 순서대로 지난 뒤 브라우저로 판정이 돌아온다." style="font-family:var(--font)">
+        <defs>
+          <marker id="dk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0F172A"/></marker>
+          <marker id="dkA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#396BAC"/></marker>
+        </defs>
+        <!-- ② 검증 대상 기사 -->
+        <rect x="336" y="60" width="240" height="84" fill="#fff" stroke="#0F172A" stroke-width="1.4"/>
+        <circle cx="358" cy="60" r="14" fill="#fff" stroke="#0F172A" stroke-width="1.4"/>
+        <text x="358" y="65" font-size="14" font-weight="700" text-anchor="middle" fill="#0F172A">2</text>
+        <text x="456" y="100" font-size="18" font-weight="700" text-anchor="middle" fill="#0F172A">검증 대상 기사</text>
+        <text x="456" y="126" font-size="13.5" text-anchor="middle" fill="#64748B">뉴스 · Instagram · X</text>
+        <line x1="456" y1="144" x2="456" y2="194" stroke="#0F172A" stroke-width="1.4" marker-end="url(#dk)"/>
+        <text x="470" y="176" font-size="13.5" fill="#64748B">본문 가져오기</text>
+        <!-- ① 브라우저 -->
+        <rect x="60" y="200" width="190" height="140" fill="#fff" stroke="#0F172A" stroke-width="1.4"/>
+        <circle cx="82" cy="200" r="14" fill="#fff" stroke="#0F172A" stroke-width="1.4"/>
+        <text x="82" y="205" font-size="14" font-weight="700" text-anchor="middle" fill="#0F172A">1</text>
+        <text x="155" y="258" font-size="18" font-weight="700" text-anchor="middle" fill="#0F172A">브라우저</text>
+        <text x="155" y="288" font-size="13.5" text-anchor="middle" fill="#64748B">사용자가 뉴스 링크를</text>
+        <text x="155" y="308" font-size="13.5" text-anchor="middle" fill="#64748B">붙여넣습니다</text>
+        <!-- 허브 -->
+        <rect x="336" y="200" width="240" height="140" fill="#fff" stroke="#0F172A" stroke-width="2.5"/>
+        <text x="456" y="258" font-size="18" font-weight="700" text-anchor="middle" fill="#0F172A">Vercel</text>
+        <text x="456" y="288" font-size="13.5" text-anchor="middle" fill="#64748B">Fake News Defender</text>
+        <text x="456" y="308" font-size="13.5" text-anchor="middle" fill="#64748B">서버</text>
+        <!-- ③ 검색 -->
+        <rect x="662" y="200" width="230" height="140" fill="#fff" stroke="#0F172A" stroke-width="1.4"/>
+        <circle cx="684" cy="200" r="14" fill="#fff" stroke="#0F172A" stroke-width="1.4"/>
+        <text x="684" y="205" font-size="14" font-weight="700" text-anchor="middle" fill="#0F172A">3</text>
+        <text x="777" y="252" font-size="18" font-weight="700" text-anchor="middle" fill="#0F172A">네이버 뉴스</text>
+        <text x="777" y="278" font-size="18" font-weight="700" text-anchor="middle" fill="#0F172A">DuckDuckGo</text>
+        <text x="777" y="308" font-size="13.5" text-anchor="middle" fill="#64748B">비교할 실제 뉴스를 찾습니다</text>
+        <!-- ④ Gemini -->
+        <rect x="978" y="200" width="240" height="140" fill="#fff" stroke="#0F172A" stroke-width="1.4"/>
+        <circle cx="1000" cy="200" r="14" fill="#fff" stroke="#0F172A" stroke-width="1.4"/>
+        <text x="1000" y="205" font-size="14" font-weight="700" text-anchor="middle" fill="#0F172A">4</text>
+        <text x="1098" y="258" font-size="18" font-weight="700" text-anchor="middle" fill="#0F172A">Google Gemini</text>
+        <text x="1098" y="288" font-size="13.5" text-anchor="middle" fill="#64748B">두 글을 대조해</text>
+        <text x="1098" y="308" font-size="13.5" text-anchor="middle" fill="#64748B">판정합니다</text>
+        <!-- 가로 흐름 -->
+        <line x1="250" y1="270" x2="330" y2="270" stroke="#0F172A" stroke-width="1.4" marker-end="url(#dk)"/>
+        <text x="290" y="260" font-size="13.5" text-anchor="middle" fill="#64748B">뉴스 링크</text>
+        <line x1="576" y1="270" x2="656" y2="270" stroke="#0F172A" stroke-width="1.4" marker-end="url(#dk)"/>
+        <text x="616" y="260" font-size="13.5" text-anchor="middle" fill="#64748B">검색어</text>
+        <line x1="892" y1="270" x2="972" y2="270" stroke="#0F172A" stroke-width="1.4" marker-end="url(#dk)"/>
+        <text x="932" y="260" font-size="13.5" text-anchor="middle" fill="#64748B">관련 기사</text>
+        <!-- ⑤ Supabase -->
+        <rect x="336" y="430" width="240" height="100" fill="#fff" stroke="#0F172A" stroke-width="1.4"/>
+        <circle cx="358" cy="430" r="14" fill="#fff" stroke="#0F172A" stroke-width="1.4"/>
+        <text x="358" y="435" font-size="14" font-weight="700" text-anchor="middle" fill="#0F172A">5</text>
+        <text x="456" y="472" font-size="18" font-weight="700" text-anchor="middle" fill="#0F172A">Supabase</text>
+        <text x="456" y="500" font-size="13.5" text-anchor="middle" fill="#64748B">검증 기록 · 통계 저장</text>
+        <line x1="400" y1="340" x2="400" y2="424" stroke="#0F172A" stroke-width="1.4" marker-end="url(#dk)"/>
+        <text x="388" y="388" font-size="13.5" text-anchor="end" fill="#64748B">결과 저장</text>
+        <!-- 캐시 단축 경로 -->
+        <line x1="500" y1="424" x2="500" y2="346" stroke="#396BAC" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#dkA)"/>
+        <text x="514" y="388" font-size="13.5" font-weight="700" fill="#396BAC">최근에 검사한 기사면 저장된 결과로 바로 응답</text>
+        <!-- 결과 반환 -->
+        <polyline points="1098,340 1098,572 155,572 155,346" fill="none" stroke="#0F172A" stroke-width="1.4" marker-end="url(#dk)"/>
+        <text x="640" y="562" font-size="15" font-weight="700" text-anchor="middle" fill="#0F172A">진짜 · 가짜 · 의심 판정과 그 근거</text>
+      </svg>
+    </div>
+    <span class="folio">12</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     13 · 캐시 단축 경로
+     ══════════════════════════════════════════ -->
+<section class="slide">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">적용 기술</span>
+    </div>
+    <div class="stack">
+      <div class="kicker reveal" style="color:#396BAC">단축 경로</div>
+      <h2 class="head reveal">같은 링크를 24시간 안에 이미 검사했고<br>그 결과가 <em>‘진짜’</em>였다면,</h2>
+      <div class="ba reveal" style="margin-top:36px">
+        <div class="band" style="border-left-color:#396BAC">
+          <div class="lbl" style="color:#396BAC">건너뛰는 것</div>
+          <div class="flow">
+            <span class="step" style="border-color:#CBD5E1;color:#CBD5E1;text-decoration:line-through">본문 크롤링</span>
+            <span class="step" style="border-color:#CBD5E1;color:#CBD5E1;text-decoration:line-through">실시간 검색</span>
+            <span class="step" style="border-color:#CBD5E1;color:#CBD5E1;text-decoration:line-through">LLM 호출</span>
+          </div>
+          <div class="note">외부 API 호출량과 응답 시간을 동시에 줄입니다. 반면 ‘가짜’와 ‘의심’은 캐시하지 않고 매번 다시 검증합니다. 후속 보도로 상황이 바뀔 수 있기 때문입니다.</div>
+        </div>
+      </div>
+    </div>
+    <span class="folio">13</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     14 · 핵심 기술 ① 2단계 적응형 RAG
+     ══════════════════════════════════════════ -->
+<section class="slide">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">핵심 기술 01</span>
+    </div>
+    <div class="kicker reveal" style="margin-top:34px">핵심 기술 01 — 2단계 적응형 RAG</div>
+    <h2 class="head reveal" style="font-size:54px">제목이 아니라 본문을 읽고 다시 줄을 세웁니다</h2>
+    <div class="ba reveal" style="margin-top:38px">
+      <div class="band">
+        <div class="lbl">1단계 — 메타데이터만으로 판단</div>
+        <div class="flow"><span class="step">제목 · 스니펫</span><span class="arw">→</span><span class="step">점수</span><span class="arw">→</span><span class="step">상위 3건</span></div>
+        <div class="note">제목만 그럴듯한 낚시성 기사가 근거로 섞여 들어옵니다.</div>
+      </div>
+      <div class="band">
+        <div class="lbl">2단계 — 본문을 읽고 다시 판단</div>
+        <div class="flow"><span class="step hot">후보 6건</span><span class="arw">→</span><span class="step hot">본문 병렬 크롤링</span><span class="arw">→</span><span class="step hot">재점수 · 재정렬</span><span class="arw">→</span><span class="step hot">상위 3건</span></div>
+        <div class="note">크롤링에 실패한 후보는 1차 점수를 그대로 유지해 파이프라인이 멈추지 않습니다.</div>
+      </div>
+    </div>
+    <span class="folio">14</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     15 · 핵심 기술 ② 본문 기반 중복 검출
+     ══════════════════════════════════════════ -->
+<section class="slide">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">핵심 기술 02</span>
+    </div>
+    <div class="kicker reveal" style="margin-top:34px">핵심 기술 02 — 본문 기반 중복 검출</div>
+    <h2 class="head reveal" style="font-size:54px">방향이 반대면, 제목이 같아도 다른 근거입니다</h2>
+    <div class="list reveal" style="margin-top:34px">
+      <div class="row"><span class="n">01</span><div><div class="t">상투 문구 정규화</div><div class="d">기자명 · 이메일 · 저작권 · 배포 문구를 먼저 걷어냅니다.</div></div></div>
+      <div class="row"><span class="n">02</span><div><div class="t">본문 유사도 + 제목 유사도 결합</div><div class="d">받아쓴 보도자료를 하나의 출처로 묶습니다.</div></div></div>
+      <div class="row"><span class="n">03</span><div><div class="t">대립 방향성 감지</div><div class="d">투자↔철회, 찬성↔반대, 사실무근↔사실을 감지하면 중복에서 분리해 보존합니다.</div></div></div>
+    </div>
+    <span class="folio">15</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     16 · 핵심 기술 ③ 근거 품질 지표
+     ══════════════════════════════════════════ -->
+<section class="slide">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">핵심 기술 03</span>
+    </div>
+    <div class="kicker reveal" style="margin-top:34px">핵심 기술 03 — 근거 품질 지표</div>
+    <h2 class="head reveal" style="font-size:54px">이 값도 모델이 아니라 코드가 계산합니다</h2>
+    <div class="weights reveal">
+      <div class="wbar">
+        <span style="width:40%;background:#1E3A5F">40%</span>
+        <span style="width:30%;background:#396BAC">30%</span>
+        <span style="width:15%;background:#027A48">15%</span>
+        <span style="width:15%;background:#B54708">15%</span>
+      </div>
+      <div class="wkey">
+        <b><i style="background:#1E3A5F"></i>출처 가중치 평균</b>
+        <b><i style="background:#396BAC"></i>독립 출처 수 비율</b>
+        <b><i style="background:#027A48"></i>도메인 다양성</b>
+        <b><i style="background:#B54708"></i>1차 공식 자료 보너스</b>
+      </div>
+    </div>
+    <p class="lede reveal" style="margin-top:44px">정부기관 · 법원 · 통계청 · 선관위 · 전자공시 같은 <b>1차 공식 자료</b>는<br>2차 언론 기사보다 최우선 대조군으로 배정합니다.</p>
+    <span class="folio">16</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     17 · 섹션 — 주요 기능
+     ══════════════════════════════════════════ -->
+<section class="slide sec">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">03 / 04</span>
+    </div>
+    <div class="stack">
+      <div class="sec-num reveal">03</div>
+      <div class="sec-name reveal">주요 기능</div>
+      <div class="sec-note reveal">링크 하나를 넣으면 자동으로 이어지는 세 화면 — 랜딩, 분석, 대시보드.</div>
+      <div class="sec-rule reveal"></div>
+    </div>
+    <span class="folio">17</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     18 · 화면 구성 개요
+     ══════════════════════════════════════════ -->
+<section class="slide">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">주요 기능</span>
+    </div>
+    <div class="stack">
+      <div class="kicker reveal">화면 구성</div>
+      <h2 class="head reveal">링크를 한 번 넣으면<br>세 화면이 <em>자동으로 이어집니다.</em></h2>
+      <div class="ba reveal" style="margin-top:40px">
+        <div class="band" style="border-left-color:#1E3A5F">
+          <div class="flow">
+            <span class="step">랜딩 — 링크 입력</span><span class="arw">→</span>
+            <span class="step">분석 — 본문 스캔</span><span class="arw">→</span>
+            <span class="step">대시보드 — 결과와 기록</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <span class="folio">18</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     19 · 랜딩 화면
+     ══════════════════════════════════════════ -->
+<section class="slide">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">주요 기능 · 시연</span>
+    </div>
+    <div class="kicker reveal" style="margin-top:32px">화면 01 — 랜딩</div>
+    <div class="demo reveal">
+      <div class="feat">
+        <p><b>계단식 진입 애니메이션</b> — 문구와 입력창이 순서대로 떠오릅니다</p>
+        <p><b>링크 전용 입력</b> — 일반 문장은 서버로 보내지 않고 화면 안에서 알립니다</p>
+        <p><b>Top 5 티커</b> — 가장 많이 검증된 기사가 4초마다 한 칸씩</p>
+        <p><b>다섯 단계 페이드</b> — 1위는 크고 굵게, 아래로 갈수록 흐리게</p>
+        <p><b>hover 일시정지</b> — 읽는 도중 화면이 바뀌지 않습니다</p>
+        <p><b>반응형 문구</b> — 좁은 화면에서 안내 문구와 줄바꿈이 바뀝니다</p>
+      </div>
+      <div class="shot">
+        <div class="ic">SCREEN RECORDING</div>
+        <div class="cap">랜딩 화면 녹화<br>진입 → 오류 안내 → 티커 회전 → 모바일 폭</div>
+      </div>
+    </div>
+    <span class="folio">19</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     20 · 분석 로딩 화면
+     ══════════════════════════════════════════ -->
+<section class="slide">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">주요 기능 · 시연</span>
+    </div>
+    <div class="kicker reveal" style="margin-top:32px">화면 02 — 분석</div>
+    <div class="demo reveal">
+      <div class="feat">
+        <p><b>부드러운 전환</b> — 티커가 먼저 빠지고 분석 블록이 올라옵니다</p>
+        <p><b>출처명 표시</b> — 페이지 메타데이터에서 매체명을 읽어 옵니다</p>
+        <p><b>본문 스캔</b> — 실제 수집한 기사가 1.7초마다 한 문단씩</p>
+        <p><b>분석 중인 문단만 진하게</b> — 지금 읽는 위치를 보여줍니다</p>
+        <p><b>문단 높이 실측 정렬</b> — 고정 픽셀이 아니라 실제 위치를 재서 맞춥니다</p>
+        <p><b>위아래 페이드</b> — 문단이 잘려 보이지 않습니다</p>
+      </div>
+      <div class="shot">
+        <div class="ic">SCREEN RECORDING</div>
+        <div class="cap">분석 로딩 화면 녹화<br>전환 → 본문 스캔 10초 → 완료 → 대시보드</div>
+      </div>
+    </div>
+    <span class="folio">20</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     21 · 대시보드 상단
+     ══════════════════════════════════════════ -->
+<section class="slide">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">주요 기능 · 시연</span>
+    </div>
+    <div class="kicker reveal" style="margin-top:32px">화면 03 — 대시보드 상단</div>
+    <div class="demo reveal">
+      <div class="feat">
+        <p><b>고정 마스트헤드</b> — 스크롤해도 상단에 남습니다</p>
+        <p><b>헤드라인 티커</b> — 가장 많이 검증된 기사 Top 5가 4초마다</p>
+        <p><b>클릭 시 레포트 열림</b> — 신문 1면 헤드라인처럼 동작합니다</p>
+        <p><b>제호 → 홈</b> — 좁은 화면에서는 홈 아이콘으로 바뀝니다</p>
+        <p><b>대시보드 내 검증</b> — 같은 자리에서 바로 다음 링크를</p>
+        <p><b>3단계 스테퍼</b> — 본문 수집 · 교차 검색 · 사실 검증</p>
+      </div>
+      <div class="shot">
+        <div class="ic">SCREEN RECORDING</div>
+        <div class="cap">마스트헤드 녹화<br>티커 → 홈 복귀 → 검증 → 스테퍼 진행</div>
+      </div>
+    </div>
+    <span class="folio">21</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     22 · 정밀 진단 레포트
+     ══════════════════════════════════════════ -->
+<section class="slide">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">주요 기능 · 시연</span>
+    </div>
+    <div class="kicker reveal" style="margin-top:32px">화면 04 — 정밀 진단 레포트</div>
+    <div class="demo reveal">
+      <div class="feat">
+        <p><b>자동 스크롤</b> — 검증 직후와 히스토리 클릭이 같게 동작합니다</p>
+        <p><b>결론이 맨 위</b> — 판정 → 모순율 → 막대 → 제목 → 데이트라인</p>
+        <p><b>모순율은 불일치 정도</b> — 진실일 확률이 아닙니다</p>
+        <p><b>요소별 세부 검증</b> — 주장을 하나씩 진실 · 거짓 · 판단유보로</p>
+        <p><b>교차 검증 출처</b> — 참고문헌 형식으로 번호를 붙여 제시</p>
+        <p><b>공동 팩트체크</b> — 익명 토큰으로 본인 댓글만 삭제</p>
+      </div>
+      <div class="shot">
+        <div class="ic">SCREEN RECORDING</div>
+        <div class="cap">레포트 녹화<br>자동 스크롤 → 세부 검증 → 출처 → 댓글 → 닫기</div>
+      </div>
+    </div>
+    <span class="folio">22</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     23 · 통계 · 랭킹 · 히스토리
+     ══════════════════════════════════════════ -->
+<section class="slide">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">주요 기능 · 시연</span>
+    </div>
+    <div class="kicker reveal" style="margin-top:32px">화면 05 — 통계 · 랭킹 · 히스토리</div>
+    <div class="demo reveal">
+      <div class="feat">
+        <p><b>숫자가 곧 필터</b> — 가짜를 누르면 히스토리가 가짜만 남습니다</p>
+        <p><b>판정 분포 막대</b> — 진짜 · 가짜 · 의심 비율을 한 줄로</p>
+        <p><b>고정 랭킹 레일</b> — 본문을 따라오며 레일 안쪽만 스크롤</p>
+        <p><b>모바일 순서 전환</b> — 좁은 화면에서는 랭킹이 히스토리보다 먼저</p>
+        <p><b>히스토리 표</b> — 판정 · 기사 · 모순율 · 삭제</p>
+        <p><b>목록은 25건, 통계는 전체</b> — 데이터를 지우지 않아 누적 지표가 정확합니다</p>
+      </div>
+      <div class="shot">
+        <div class="ic">SCREEN RECORDING</div>
+        <div class="cap">하단 영역 녹화<br>필터 적용 → 해제 → 레일 스크롤 → 모바일 순서</div>
+      </div>
+    </div>
+    <span class="folio">23</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     24 · 섹션 — 기대효과
+     ══════════════════════════════════════════ -->
+<section class="slide sec">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">04 / 04</span>
+    </div>
+    <div class="stack">
+      <div class="sec-num reveal">04</div>
+      <div class="sec-name reveal">기대효과</div>
+      <div class="sec-note reveal">이 시스템이 실제로 무엇을 가능하게 하는가.</div>
+      <div class="sec-rule reveal"></div>
+    </div>
+    <span class="folio">24</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     25 · 기대효과 2×2
+     ══════════════════════════════════════════ -->
+<section class="slide">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">기대효과</span>
+    </div>
+    <div class="kicker reveal" style="margin-top:32px">기대효과</div>
+    <div class="quad reveal">
+      <div>
+        <div class="qn">01</div>
+        <div class="qt">검증 가능한 판정</div>
+        <div class="qd">결론만 내놓지 않고 주장별 판정과 교차 출처를 함께 제시합니다. 사용자가 근거를 직접 확인하고 반박할 수 있습니다.</div>
+      </div>
+      <div>
+        <div class="qn">02</div>
+        <div class="qt">LLM 환각 억제</div>
+        <div class="qd">지표를 코드로 확정했기 때문에 모델이 지어낸 숫자가 올라오지 않습니다. 같은 입력에 지표가 재현됩니다.</div>
+      </div>
+      <div>
+        <div class="qn">03</div>
+        <div class="qt">SNS 루머 대응</div>
+        <div class="qd">인스타그램과 X 게시물을 전용 파서로 처리해 기사와 같은 파이프라인에 태웁니다. 본문에 인용된 뉴스도 직접 수집합니다.</div>
+      </div>
+      <div>
+        <div class="qn">04</div>
+        <div class="qt">공개 가능한 안전성</div>
+        <div class="qd">DNS 단계에서 사설망과 메타데이터 주소를 차단하고 리다이렉트마다 재검증합니다. 요청 제한과 텍스트 격리를 더했습니다.</div>
+      </div>
+    </div>
+    <span class="folio">25</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════
+     26 · 마무리
+     ══════════════════════════════════════════ -->
+<section class="slide">
+  <div class="pad">
+    <div class="masthead">
+      <span class="wordmark">Fake News Defender</span>
+      <span class="dateline">2026 · 공학경진대회</span>
+    </div>
+    <div class="stack end">
+      <div class="big reveal">객관적 계산은 <em>코드가</em>,<br>의미 판단은 <em>모델이</em>.</div>
+      <div class="sub reveal">감사합니다.</div>
+    </div>
+    <span class="folio">26</span>
+  </div>
+</section>
+
+</main>
+</div>
+
+<div class="progress" id="progress"></div>
+<div class="edit-hotzone"></div>
+<button class="edit-toggle" id="editToggle" title="편집 모드 (E)">편집</button>
+
+<script>
+/* ===========================================
+   SLIDE PRESENTATION CONTROLLER
+   =========================================== */
+class SlidePresentation {
+  constructor(){
+    this.slides = document.querySelectorAll('.slide');
+    this.stage  = document.getElementById('deckStage');
+    this.bar    = document.getElementById('progress');
+    this.current = 0;
+    this.setupStageScale();
+    this.setupKeyboardNav();
+    this.setupTouchNav();
+    this.setupWheelNav();
+    this.showSlide(0);
+  }
+
+  /* --- 고정 무대를 통째로 스케일 (레이아웃 재배치 없음) --- */
+  setupStageScale(){
+    const scale = () => {
+      const f = Math.min(window.innerWidth/1920, window.innerHeight/1080);
+      const x = (window.innerWidth  - 1920*f)/2;
+      const y = (window.innerHeight - 1080*f)/2;
+      this.stage.style.transform = `translate(${x}px, ${y}px) scale(${f})`;
+    };
+    scale();
+    window.addEventListener('resize', scale);
+  }
+
+  setupKeyboardNav(){
+    document.addEventListener('keydown', (e) => {
+      if (e.target.getAttribute && e.target.getAttribute('contenteditable')) return;
+      switch(e.key){
+        case 'ArrowRight': case 'ArrowDown': case ' ': case 'PageDown':
+          e.preventDefault(); this.next(); break;
+        case 'ArrowLeft': case 'ArrowUp': case 'PageUp':
+          e.preventDefault(); this.prev(); break;
+        case 'Home': e.preventDefault(); this.showSlide(0); break;
+        case 'End':  e.preventDefault(); this.showSlide(this.slides.length-1); break;
+      }
+    });
+  }
+
+  setupTouchNav(){
+    let x0 = null, y0 = null;
+    document.addEventListener('touchstart', (e)=>{ x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, {passive:true});
+    document.addEventListener('touchend', (e)=>{
+      if (x0 === null) return;
+      const dx = e.changedTouches[0].clientX - x0;
+      const dy = e.changedTouches[0].clientY - y0;
+      if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) { dx < 0 ? this.next() : this.prev(); }
+      x0 = y0 = null;
+    }, {passive:true});
+  }
+
+  setupWheelNav(){
+    let lock = false;
+    window.addEventListener('wheel', (e)=>{
+      if (lock) return;
+      if (Math.abs(e.deltaY) < 24) return;
+      lock = true;
+      e.deltaY > 0 ? this.next() : this.prev();
+      setTimeout(()=>{ lock = false; }, 700);
+    }, {passive:true});
+  }
+
+  next(){ this.showSlide(this.current + 1); }
+  prev(){ this.showSlide(this.current - 1); }
+
+  showSlide(i){
+    this.current = Math.max(0, Math.min(i, this.slides.length - 1));
+    this.slides.forEach((s, idx) => {
+      const on = idx === this.current;
+      s.classList.toggle('active', on);
+      s.classList.toggle('visible', on);
+    });
+    this.bar.style.width = (((this.current + 1) / this.slides.length) * 100) + '%';
+    location.hash = 'slide-' + (this.current + 1);
+  }
+}
+
+/* 해시로 특정 슬라이드부터 열기 (#slide-12)
+   생성자가 showSlide(0)에서 해시를 덮어쓰므로 반드시 먼저 읽어 둔다 */
+const initialHash = location.hash;
+const deck = new SlidePresentation();
+(function(){
+  const m = /slide-(\d+)/.exec(initialHash);
+  if (m) deck.showSlide(parseInt(m[1], 10) - 1);
+})();
+
+/* ===========================================
+   INLINE EDITING — 초안 이후 수정을 위한 장치
+   =========================================== */
+class InlineEditor {
+  constructor(){
+    this.isActive = false;
+    this.selector = 'h2, p, div.t, div.d, div.qt, div.qd, div.cap, div.sec-name, div.sec-note, div.lede, div.axiom, div.big, div.t-title, div.t-stand, span.step, div.note, td, th, .kicker, .vword, .lbl, .k, .h, .m';
+    this.restore();
+  }
+  toggleEditMode(){
+    this.isActive = !this.isActive;
+    const btn = document.getElementById('editToggle');
+    btn.classList.toggle('active', this.isActive);
+    btn.textContent = this.isActive ? '저장 (Ctrl+S)' : '편집';
+    document.querySelectorAll('.slide ' + this.selector).forEach(el => {
+      el.setAttribute('contenteditable', this.isActive ? 'true' : 'false');
+      if (this.isActive) el.addEventListener('blur', this.save, {once:false});
+    });
+    if (!this.isActive) this.save();
+  }
+  save = () => {
+    const data = {};
+    document.querySelectorAll('.slide').forEach((s, si) => {
+      s.querySelectorAll(this.selector).forEach((el, ei) => { data[si + ':' + ei] = el.innerHTML; });
+    });
+    try { localStorage.setItem('fnd-deck-edits', JSON.stringify(data)); } catch(e){}
+  }
+  restore(){
+    let data;
+    try { data = JSON.parse(localStorage.getItem('fnd-deck-edits') || 'null'); } catch(e){ return; }
+    if (!data) return;
+    document.querySelectorAll('.slide').forEach((s, si) => {
+      s.querySelectorAll(this.selector).forEach((el, ei) => {
+        const v = data[si + ':' + ei];
+        if (typeof v === 'string') el.innerHTML = v;
+      });
+    });
+  }
+}
+const editor = new InlineEditor();
+
+/* --- 토글 노출: JS 지연 방식 (CSS ~ 선택자는 hover 체인이 끊김) --- */
+(function(){
+  const hotzone = document.querySelector('.edit-hotzone');
+  const btn = document.getElementById('editToggle');
+  let hideTimeout = null;
+  const show = () => { clearTimeout(hideTimeout); btn.classList.add('show'); };
+  const hide = () => { hideTimeout = setTimeout(()=>{ if(!editor.isActive) btn.classList.remove('show'); }, 400); };
+  hotzone.addEventListener('mouseenter', show);
+  hotzone.addEventListener('mouseleave', hide);
+  btn.addEventListener('mouseenter', show);
+  btn.addEventListener('mouseleave', hide);
+  hotzone.addEventListener('click', ()=> editor.toggleEditMode());
+  btn.addEventListener('click', ()=> editor.toggleEditMode());
+  document.addEventListener('keydown', (e)=>{
+    if ((e.key === 'e' || e.key === 'E') && !e.target.getAttribute('contenteditable')) editor.toggleEditMode();
+    if ((e.metaKey || e.ctrlKey) && e.key === 's'){ e.preventDefault(); editor.save(); }
+  });
+})();
+</script>
+</body>
+</html>

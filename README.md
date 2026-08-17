@@ -34,6 +34,12 @@
 
 ## 🏗️ 2. 시스템 아키텍처 및 파이프라인 (Architecture Flow)
 
+![Fake News Defender 동작 구조](docs/architecture.svg)
+
+파란 점선은 캐시 단축 경로입니다. 같은 URL에 대해 24시간 안에 `REAL` 판정 기록이 있으면 크롤링·검색·Gemini 호출을 모두 건너뛰고 저장된 결과를 그대로 반환합니다. 배포 경계와 파이프라인 단계까지 담은 상세도는 [docs/architecture-detail.svg](docs/architecture-detail.svg)에 있습니다.
+
+아래 흐름도는 위 구조를 3단계 파이프라인 기준으로 다시 정리한 것입니다.
+
 ```mermaid
 flowchart TD
     subgraph Stage1["1. 수집 & 보안 검증"]
