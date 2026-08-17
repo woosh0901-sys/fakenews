@@ -1,0 +1,147 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1320 620"
+     role="img" aria-label="Fake News Defender 시스템 아키텍처. 브라우저의 검증 요청이 Vercel 서버리스 FastAPI로 들어가 본문 추출, 로컬 키워드 추출, 하이브리드 근거 수집, Gemini RAG 대조 판정 네 단계를 거쳐 판정을 돌려주며, 24시간 내 REAL 캐시가 있으면 네 단계를 모두 생략한다."
+     font-family="'Helvetica Neue', Helvetica, Arial, 'SUIT Variable', SUIT, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif">
+  <title>Fake News Defender 시스템 아키텍처</title>
+
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#0F172A"/>
+    </marker>
+    <marker id="ar-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#396BAC"/>
+    </marker>
+  </defs>
+
+  <rect width="1320" height="620" fill="#FFFFFF"/>
+
+  <!-- 제목 -->
+  <text x="24" y="30" font-size="13" font-weight="700" fill="#0F172A" letter-spacing="0.02em">FAKE NEWS DEFENDER — 시스템 아키텍처</text>
+  <line x1="24" y1="42" x2="1296" y2="42" stroke="#0F172A" stroke-width="1.5"/>
+
+  <!-- ================= 외부 의존성 (상단) ================= -->
+  <text x="24" y="80" font-size="9.5" font-weight="700" fill="#64748B" letter-spacing="0.16em">외부 의존성</text>
+
+  <!-- 대상 페이지 -->
+  <rect x="464" y="104" width="170" height="60" fill="#FFFFFF" stroke="#0F172A" stroke-width="1"/>
+  <text x="480" y="128" font-size="12" font-weight="700" fill="#0F172A">검증 대상 페이지</text>
+  <text x="480" y="148" font-size="10" fill="#64748B">뉴스 · Instagram · X</text>
+
+  <!-- 실시간 검색 그룹 -->
+  <rect x="864" y="68" width="180" height="116" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="876" y="88" font-size="9.5" font-weight="700" fill="#64748B" letter-spacing="0.14em">실시간 검색</text>
+  <rect x="876" y="96" width="156" height="36" fill="#FFFFFF" stroke="#0F172A" stroke-width="1"/>
+  <text x="890" y="119" font-size="12" font-weight="700" fill="#0F172A">네이버 뉴스 API</text>
+  <rect x="876" y="140" width="156" height="36" fill="#FFFFFF" stroke="#0F172A" stroke-width="1"/>
+  <text x="890" y="163" font-size="12" font-weight="700" fill="#0F172A">DuckDuckGo</text>
+
+  <!-- Gemini -->
+  <rect x="1084" y="104" width="180" height="60" fill="#FFFFFF" stroke="#0F172A" stroke-width="1"/>
+  <text x="1100" y="128" font-size="12" font-weight="700" fill="#0F172A">Google Gemini</text>
+  <text x="1100" y="148" font-size="10" fill="#64748B">generativelanguage v1beta</text>
+
+  <!-- 외부 → 파이프라인 -->
+  <line x1="549" y1="164" x2="549" y2="258" stroke="#0F172A" stroke-width="1.2" marker-end="url(#ar)"/>
+  <text x="557" y="218" font-size="10" fill="#64748B">본문 크롤링</text>
+  <line x1="954" y1="184" x2="954" y2="258" stroke="#0F172A" stroke-width="1.2" marker-end="url(#ar)"/>
+  <text x="962" y="218" font-size="10" fill="#64748B">키워드 질의</text>
+  <line x1="1174" y1="164" x2="1174" y2="258" stroke="#0F172A" stroke-width="1.2" marker-end="url(#ar)"/>
+  <text x="1182" y="218" font-size="10" fill="#64748B">대조 프롬프트</text>
+
+  <!-- ================= 요청 경로 (중앙 스파인) ================= -->
+
+  <!-- 라우팅 주석 -->
+  <line x1="24" y1="164" x2="24" y2="224" stroke="#0F172A" stroke-width="2"/>
+  <text x="38" y="180" font-size="10.5" font-weight="700" fill="#0F172A">vercel.json 라우팅</text>
+  <text x="38" y="199" font-size="9.5" fill="#64748B">파일시스템(정적 자산)이 먼저, 남은 요청만 rewrite</text>
+  <text x="38" y="216" font-size="9.5" fill="#64748B">/api/(.*) → api/index.py · 그 외 → index.html</text>
+
+  <!-- 브라우저 -->
+  <rect x="24" y="264" width="140" height="104" fill="#FFFFFF" stroke="#0F172A" stroke-width="1.5"/>
+  <text x="40" y="296" font-size="12.5" font-weight="700" fill="#0F172A">브라우저</text>
+  <text x="40" y="316" font-size="10" fill="#64748B">React 19 · Vite</text>
+  <text x="40" y="334" font-size="10" fill="#64748B">Landing →</text>
+  <text x="40" y="350" font-size="10" fill="#64748B">대시보드</text>
+
+  <!-- Vercel 컨테이너 -->
+  <rect x="234" y="248" width="190" height="136" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="246" y="266" font-size="9.5" font-weight="700" fill="#64748B" letter-spacing="0.14em">VERCEL</text>
+  <rect x="246" y="276" width="166" height="44" fill="#FFFFFF" stroke="#0F172A" stroke-width="1"/>
+  <text x="258" y="294" font-size="11.5" font-weight="700" fill="#0F172A">정적 빌드</text>
+  <text x="258" y="311" font-size="9.5" fill="#64748B">frontend/dist · public/demo</text>
+  <rect x="246" y="328" width="166" height="44" fill="#FFFFFF" stroke="#0F172A" stroke-width="1"/>
+  <text x="258" y="346" font-size="11.5" font-weight="700" fill="#0F172A">Serverless Function</text>
+  <text x="258" y="363" font-size="9.5" fill="#64748B">api/index.py → FastAPI</text>
+
+  <line x1="164" y1="298" x2="240" y2="298" stroke="#0F172A" stroke-width="1.2" marker-end="url(#ar)"/>
+  <text x="202" y="292" font-size="10" fill="#64748B" text-anchor="middle">GET /*</text>
+  <line x1="164" y1="350" x2="240" y2="350" stroke="#0F172A" stroke-width="1.2" marker-end="url(#ar)"/>
+  <text x="202" y="344" font-size="10" fill="#64748B" text-anchor="middle">POST /api/*</text>
+
+  <!-- 파이프라인 그룹 -->
+  <rect x="452" y="248" width="824" height="144" fill="none" stroke="#CBD5E1" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="464" y="382" font-size="9.5" font-weight="700" fill="#64748B" letter-spacing="0.14em">fact_checker_by_url.py — check_url_validity()</text>
+
+  <!-- ① 본문 추출 -->
+  <rect x="464" y="264" width="170" height="104" fill="#FFFFFF" stroke="#0F172A" stroke-width="1"/>
+  <circle cx="482" cy="264" r="11" fill="#FFFFFF" stroke="#0F172A" stroke-width="1"/>
+  <text x="482" y="268" font-size="11" font-weight="700" fill="#0F172A" text-anchor="middle">1</text>
+  <text x="480" y="296" font-size="12.5" font-weight="700" fill="#0F172A">본문 추출</text>
+  <text x="480" y="316" font-size="10" fill="#64748B">BeautifulSoup + lxml</text>
+  <text x="480" y="334" font-size="10" fill="#64748B">SNS 전용 파서 분기</text>
+
+  <!-- ② 키워드 추출 -->
+  <rect x="674" y="264" width="150" height="104" fill="#FFFFFF" stroke="#0F172A" stroke-width="1"/>
+  <circle cx="692" cy="264" r="11" fill="#FFFFFF" stroke="#0F172A" stroke-width="1"/>
+  <text x="692" y="268" font-size="11" font-weight="700" fill="#0F172A" text-anchor="middle">2</text>
+  <text x="690" y="296" font-size="12.5" font-weight="700" fill="#0F172A">키워드 추출</text>
+  <text x="690" y="316" font-size="10" fill="#64748B">로컬 형태소 분석</text>
+  <text x="690" y="334" font-size="10" font-weight="700" fill="#0F172A">LLM 호출 0회</text>
+
+  <!-- ③ 근거 수집 -->
+  <rect x="864" y="264" width="180" height="104" fill="#FFFFFF" stroke="#0F172A" stroke-width="1"/>
+  <circle cx="882" cy="264" r="11" fill="#FFFFFF" stroke="#0F172A" stroke-width="1"/>
+  <text x="882" y="268" font-size="11" font-weight="700" fill="#0F172A" text-anchor="middle">3</text>
+  <text x="880" y="296" font-size="12.5" font-weight="700" fill="#0F172A">근거 수집</text>
+  <text x="880" y="316" font-size="10" fill="#64748B">병합·중복 제거 → 최대 3건</text>
+  <text x="880" y="333" font-size="10" fill="#64748B">본문 인용 URL은 우선 삽입</text>
+  <text x="880" y="352" font-size="10" font-weight="700" fill="#B54708">출처 0건 → SUSPICIOUS</text>
+
+  <!-- ④ RAG 대조 판정 -->
+  <rect x="1084" y="264" width="180" height="104" fill="#FFFFFF" stroke="#0F172A" stroke-width="1"/>
+  <circle cx="1102" cy="264" r="11" fill="#FFFFFF" stroke="#0F172A" stroke-width="1"/>
+  <text x="1102" y="268" font-size="11" font-weight="700" fill="#0F172A" text-anchor="middle">4</text>
+  <text x="1100" y="296" font-size="12.5" font-weight="700" fill="#0F172A">RAG 대조 판정</text>
+  <text x="1100" y="316" font-size="10" fill="#64748B">주장별 진실/거짓 + 모순율</text>
+  <text x="1100" y="333" font-size="10" fill="#64748B">3.5-flash-lite → 3.1 폴백</text>
+  <text x="1100" y="352" font-size="10" font-weight="700" fill="#B54708">호출 실패 · 429 → 판정 유보</text>
+
+  <!-- 단계 사이 화살표 -->
+  <line x1="424" y1="316" x2="458" y2="316" stroke="#0F172A" stroke-width="1.2" marker-end="url(#ar)"/>
+  <line x1="634" y1="316" x2="668" y2="316" stroke="#0F172A" stroke-width="1.2" marker-end="url(#ar)"/>
+  <line x1="824" y1="316" x2="858" y2="316" stroke="#0F172A" stroke-width="1.2" marker-end="url(#ar)"/>
+  <line x1="1044" y1="316" x2="1078" y2="316" stroke="#0F172A" stroke-width="1.2" marker-end="url(#ar)"/>
+
+  <!-- ================= 저장소 ================= -->
+  <rect x="234" y="444" width="400" height="112" fill="#FFFFFF" stroke="#0F172A" stroke-width="1.5"/>
+  <text x="250" y="472" font-size="12.5" font-weight="700" fill="#0F172A">Supabase · PostgREST</text>
+  <text x="250" y="494" font-size="10" fill="#64748B">checks · check_references · check_comments</text>
+  <line x1="250" y1="506" x2="618" y2="506" stroke="#CBD5E1" stroke-width="1"/>
+  <text x="250" y="524" font-size="10" fill="#64748B">/api/history → 최신 25건만 조회</text>
+  <text x="250" y="542" font-size="10" fill="#64748B">/api/stats · rankings → 전체 행 집계</text>
+
+  <!-- 캐시 조회 -->
+  <line x1="288" y1="384" x2="288" y2="438" stroke="#0F172A" stroke-width="1.2" marker-end="url(#ar)"/>
+  <text x="298" y="416" font-size="10" fill="#64748B">캐시 조회</text>
+
+  <!-- 캐시 적중 단축 경로 (강조) -->
+  <line x1="380" y1="444" x2="380" y2="378" stroke="#396BAC" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#ar-a)"/>
+  <text x="392" y="416" font-size="10" font-weight="700" fill="#396BAC">24시간 내 REAL 적중 → 1~4단계 전부 생략</text>
+
+  <!-- 결과 저장 -->
+  <polyline points="1120,368 1120,490 640,490" fill="none" stroke="#0F172A" stroke-width="1.2" marker-end="url(#ar)"/>
+  <text x="880" y="484" font-size="10" fill="#64748B" text-anchor="middle">결과 · 교차 출처 저장</text>
+
+  <!-- 응답 반환 -->
+  <polyline points="1220,368 1220,584 94,584 94,374" fill="none" stroke="#0F172A" stroke-width="1.2" marker-end="url(#ar)"/>
+  <text x="660" y="578" font-size="10.5" fill="#0F172A" text-anchor="middle">REAL · FAKE · SUSPICIOUS + 모순율 + 주장별 근거 + 교차 출처</text>
+</svg>
