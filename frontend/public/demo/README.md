@@ -4,6 +4,7 @@
 
 ```
 https://<앱주소>/demo/                         ← 목록
+https://<앱주소>/demo/quantum-rumor.html       ← 양자소자 루머 (의심 / SUSPICIOUS 교차근거 0건 유보 시연용)
 https://<앱주소>/demo/four-day-workweek.html   ← 주 4.5일제 (의심 / SUSPICIOUS 시연용)
 https://<앱주소>/demo/power-demand.html        ← 전력수요 (가짜뉴스 / FAKE 권장 시연용)
 https://<앱주소>/demo/minimum-wage.html        ← 최저임금 (가짜뉴스 / FAKE)
