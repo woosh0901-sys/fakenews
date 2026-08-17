@@ -302,6 +302,16 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
 .case .shot .cap{ font-size:25px; font-weight:600; color:var(--mute); text-align:center; line-height:1.62; padding:0 40px; }
 .case .shot .len{ margin-top:6px; font-size:20px; font-weight:800; letter-spacing:.14em; color:var(--navy-l); }
 
+/* 판정 흐름 띠 — 시연 슬라이드 하단 */
+.flowstrip{ margin-top:20px; padding-top:15px; border-top:3px solid var(--ink);
+  display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.flowstrip .lbl{ font-size:17px; font-weight:800; letter-spacing:.2em; color:var(--mute); margin-right:6px; }
+.flowstrip .st{ font-size:20px; font-weight:700; color:var(--ink);
+  border:2px solid var(--faint); padding:7px 15px; letter-spacing:-.01em; }
+.flowstrip .st.skip{ color:var(--faint); border-style:dashed; text-decoration:line-through; }
+.flowstrip .ar{ font-size:18px; color:var(--faint); font-weight:700; }
+.flowstrip .out{ margin-left:auto; font-size:23px; font-weight:900; letter-spacing:-.02em; }
+
 /* 2×2 사분면 */
 .quad{ margin-top:44px; display:grid; grid-template-columns:1fr 1fr; gap:0; }
 .quad > div{ padding:34px 46px 38px; border-top:5px solid var(--ink); }
@@ -630,6 +640,14 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
         <div class="len">목표 길이 35초</div>
       </div>
     </div>
+    <div class="flowstrip reveal">
+      <span class="lbl">판정 흐름</span>
+      <span class="st">본문 추출</span><span class="ar">→</span>
+      <span class="st">교차 근거 4건</span><span class="ar">→</span>
+      <span class="st">Python 지표 확정</span><span class="ar">→</span>
+      <span class="st">Gemini 사실 대조</span>
+      <span class="out" style="color:var(--fake)">조작이 입증됨 → 가짜</span>
+    </div>
     <span class="folio">14</span>
   </div>
   </section>
@@ -666,6 +684,13 @@ h2.head em{ font-style:normal; color:var(--navy-l); }
         <div class="cap">루머성 링크 입력 → 의심 판정<br>→ 유보 사유 문장</div>
         <div class="len">목표 길이 22초</div>
       </div>
+    </div>
+    <div class="flowstrip reveal">
+      <span class="lbl">판정 흐름</span>
+      <span class="st">본문 추출</span><span class="ar">→</span>
+      <span class="st">교차 근거 <b style="color:var(--susp)">0건</b></span><span class="ar">→</span>
+      <span class="st skip">Gemini 사실 대조</span>
+      <span class="out" style="color:var(--susp)">단정 불가 → 의심</span>
     </div>
     <span class="folio">15</span>
   </div>
