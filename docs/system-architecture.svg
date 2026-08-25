@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="900" viewBox="0 0 1680 900" role="img" aria-labelledby="title desc">
+  <title id="title">Fake News Defender 시스템 아키텍처 및 파이프라인</title>
+  <desc id="desc">원문 수집 및 보안 검증, RAG 검색 및 Python 기반 2단계 재평가, LLM 의미 분석 및 결과 표시의 3단계 처리 흐름</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#40566f"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+    <style>
+      .stage { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 2; }
+      .stage-title { font: 700 25px 'Noto Sans KR', 'Malgun Gothic', sans-serif; fill: #ffffff; text-anchor: middle; dominant-baseline: middle; }
+      .node { fill: #ffffff; stroke: #94a3b8; stroke-width: 2; filter: url(#shadow); }
+      .node-text { font: 600 21px 'Noto Sans KR', 'Malgun Gothic', sans-serif; fill: #172033; text-anchor: middle; dominant-baseline: middle; }
+      .node-small { font: 600 19px 'Noto Sans KR', 'Malgun Gothic', sans-serif; fill: #172033; text-anchor: middle; dominant-baseline: middle; }
+      .arrow { fill: none; stroke: #40566f; stroke-width: 3; marker-end: url(#arrow); }
+      .cross-arrow { fill: none; stroke: #1d4ed8; stroke-width: 4; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="1680" height="900" fill="#ffffff"/>
+
+  <rect class="stage" x="12" y="12" width="438" height="876" rx="18"/>
+  <path d="M30 12 H432 Q450 12 450 30 V92 H12 V30 Q12 12 30 12 Z" fill="#31577d"/>
+  <text class="stage-title" x="231" y="53">1. 원문 수집 및 보안 검증</text>
+
+  <rect class="node" x="52" y="245" width="358" height="82" rx="13"/>
+  <text class="node-text" x="231" y="286">뉴스·SNS URL 입력</text>
+  <path class="arrow" d="M231 327 V375"/>
+  <rect class="node" x="52" y="375" width="358" height="82" rx="13"/>
+  <text class="node-text" x="231" y="416">SSRF 차단 및 본문 추출</text>
+  <path class="arrow" d="M231 457 V505"/>
+  <rect class="node" x="52" y="505" width="358" height="82" rx="13"/>
+  <text class="node-text" x="231" y="546">핵심 키워드 추출</text>
+
+  <rect class="stage" x="500" y="12" width="680" height="876" rx="18"/>
+  <path d="M518 12 H1162 Q1180 12 1180 30 V92 H500 V30 Q500 12 518 12 Z" fill="#1d4ed8"/>
+  <text class="stage-title" x="840" y="53">2. RAG 검색 및 Python 기반 2단계 재평가</text>
+
+  <rect class="node" x="535" y="112" width="610" height="94" rx="13"/>
+  <text class="node-small" x="840" y="149">
+    <tspan x="840" dy="0">NAVER API HUB 뉴스 검색 및</tspan>
+    <tspan x="840" dy="27">DuckDuckGo 웹 검색</tspan>
+  </text>
+  <path class="arrow" d="M840 206 V230"/>
+  <rect class="node" x="535" y="230" width="610" height="82" rx="13"/>
+  <text class="node-text" x="840" y="271">출처 유형 분류 및 1차 관련성 평가</text>
+  <path class="arrow" d="M840 312 V336"/>
+  <rect class="node" x="535" y="336" width="610" height="82" rx="13"/>
+  <text class="node-text" x="840" y="377">상위 후보 6개의 본문 병렬 크롤링</text>
+  <path class="arrow" d="M840 418 V442"/>
+  <rect class="node" x="535" y="442" width="610" height="82" rx="13"/>
+  <text class="node-text" x="840" y="483">본문 기반 2차 재평가 및 재정렬(Re-ranking)</text>
+  <path class="arrow" d="M840 524 V548"/>
+  <rect class="node" x="535" y="548" width="610" height="94" rx="13"/>
+  <text class="node-small" x="840" y="585">
+    <tspan x="840" dy="0">제목·본문 유사도 기반 중복 제거 및</tspan>
+    <tspan x="840" dy="27">반대 주장 보존</tspan>
+  </text>
+  <path class="arrow" d="M840 642 V666"/>
+  <rect class="node" x="535" y="666" width="610" height="108" rx="13"/>
+  <text class="node-small" x="840" y="704">
+    <tspan x="840" dy="0">Python 객관 지표 계산</tspan>
+    <tspan x="840" dy="29">(독립 출처 수·공식 1차 자료 포함 여부·근거 품질)</tspan>
+  </text>
+
+  <rect class="stage" x="1230" y="12" width="438" height="876" rx="18"/>
+  <path d="M1248 12 H1650 Q1668 12 1668 30 V92 H1230 V30 Q1230 12 1248 12 Z" fill="#31577d"/>
+  <text class="stage-title" x="1449" y="53">3. LLM 의미 분석 및 결과 표시</text>
+
+  <rect class="node" x="1268" y="245" width="362" height="108" rx="13"/>
+  <text class="node-small" x="1449" y="281">
+    <tspan x="1449" dy="0">Gemini 3.5 Flash-Lite 기반</tspan>
+    <tspan x="1449" dy="27">지지·반박·충돌 관계 및</tspan>
+    <tspan x="1449" dy="27">주장별 판정</tspan>
+  </text>
+  <path class="arrow" d="M1449 353 V401"/>
+  <rect class="node" x="1268" y="401" width="362" height="94" rx="13"/>
+  <text class="node-small" x="1449" y="438">
+    <tspan x="1449" dy="0">Python 계산 지표 결합 및</tspan>
+    <tspan x="1449" dy="27">Supabase 저장</tspan>
+  </text>
+  <path class="arrow" d="M1449 495 V543"/>
+  <rect class="node" x="1268" y="543" width="362" height="94" rx="13"/>
+  <text class="node-small" x="1449" y="580">
+    <tspan x="1449" dy="0">뉴스 에디토리얼형 결과</tspan>
+    <tspan x="1449" dy="27">대시보드 표시</tspan>
+  </text>
+
+  <path class="cross-arrow" d="M410 546 C458 546 470 159 535 159"/>
+  <path class="cross-arrow" d="M1145 720 C1200 720 1200 299 1268 299"/>
+</svg>
