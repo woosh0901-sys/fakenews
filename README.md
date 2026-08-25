@@ -35,25 +35,28 @@
 ## 🏗️ 2. 시스템 아키텍처 및 파이프라인 (Architecture Flow)
 
 ```mermaid
-flowchart TD
+flowchart LR
     subgraph Stage1["1. 수집 & 보안 검증"]
+        direction TB
         A["뉴스/SNS URL 입력"] --> B["SSRF 차단 & 본문 추출"]
         B --> C["핵심 키워드 추출"]
     end
 
     subgraph Stage2["2. RAG 검색 & Python 2단계 재평가"]
-        C --> D["하이브리드 검색 (Naver News + DDG)"]
-        D --> E["상위 6개 본문 병렬 크롤링"]
-        E --> F["본문 기반 2차 재평가 & 재정렬 (Re-ranking)"]
-        F --> G["제목+본문 유사도 & 대립 방향성 중복 제거"]
-        G --> H["Python 지표 확정 (출처수·1차자료·근거품질)"]
+        direction TB
+        D["NAVER API HUB 뉴스 검색 및<br/>DuckDuckGo 웹 검색"] --> E["상위 6개 본문 병렬 크롤링"]
+        E --> F["본문 기반 2차 재평가 & 재정렬<br/>(Re-ranking)"]
+        F --> G["제목·본문 유사도 기반 중복 제거 및<br/>반대 주장 보존"]
+        G --> H["Python 객관 지표 계산<br/>(독립 출처 수·공식 1차 자료·근거 품질)"]
     end
 
-    subgraph Stage3["3. LLM 심층 분석 & 대시보드 표출"]
-        H --> I["Gemini 3.5 Flash-Lite (지지·반박·모순 의미 분석 & Claims)"]
-        I --> J["Python 계산값 결합 & DB 저장"]
-        J --> K["뉴스 에디토리얼 대시보드 실시간 표출"]
+    subgraph Stage3["3. LLM 심층 분석 & 결과 표시"]
+        direction TB
+        I["Gemini 3.5 Flash-Lite<br/>지지·반박·충돌 관계 및 주장별 판정"] --> J["Python 계산 지표 결합 및<br/>Supabase 저장"]
+        J --> K["뉴스 에디토리얼형 결과<br/>대시보드 표시"]
     end
+
+    Stage1 --> Stage2 --> Stage3
 ```
 
 ---
