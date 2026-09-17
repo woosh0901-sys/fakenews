@@ -738,11 +738,11 @@ export default function App() {
       {/* 실시간 랭킹 레일 — 데스크톱은 우측 고정(자체 스크롤), 모바일은 히스토리 앞에 온다 */}
       <aside className="mt-14 lg:mt-0 lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:self-start lg:sticky lg:top-[4.5rem] lg:pt-10 lg:max-h-[calc(100vh-5.5rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-1">
         <div className="border-t border-neutral-900 pt-4">
-          <h2 className={`${kicker} text-neutral-900`}>실시간 랭킹</h2>
+          <h2 className={`${kicker} text-neutral-900`}>실시간 랭킹 · 최근 24시간</h2>
 
           <h3 className={`mt-4 ${kicker} text-neutral-500`}>가장 많이 검증된 기사</h3>
           {headlines.length === 0 ? (
-            <p className="mt-2 text-[11px] text-neutral-400">검증 통계가 없습니다.</p>
+            <p className="mt-2 text-[11px] text-neutral-400">최근 24시간 내 검증 기록이 없습니다.</p>
           ) : (
             <ol className="mt-2 border-t border-neutral-200 divide-y divide-neutral-200">
               {headlines.map((item, idx) => (
@@ -768,9 +768,9 @@ export default function App() {
             </ol>
           )}
 
-          <h3 className={`mt-8 ${kicker} text-neutral-500`}>모순율이 가장 높은 기사 · 최근 24시간</h3>
+          <h3 className={`mt-8 ${kicker} text-neutral-500`}>모순율이 가장 높은 기사</h3>
           {(rankings.top_fakes ?? []).length === 0 ? (
-            <p className="mt-2 text-[11px] text-neutral-400">최근 24시간 내 검출된 거짓 기사가 없습니다.</p>
+            <p className="mt-2 text-[11px] text-neutral-400">검출된 거짓 기사가 없습니다.</p>
           ) : (
             <ol className="mt-2 border-t border-neutral-200 divide-y divide-neutral-200">
               {(rankings.top_fakes ?? []).map((item, idx) => {
