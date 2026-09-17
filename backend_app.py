@@ -5,7 +5,7 @@ import urllib.parse
 import re
 import time
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict
 from collections import defaultdict
 
@@ -33,6 +33,11 @@ if SUPABASE_URL:
 # 히스토리 목록에 노출할 최신 검증 개수. 데이터는 지우지 않고 조회만 제한하므로
 # 통계·랭킹의 누적 집계에는 영향을 주지 않는다.
 HISTORY_LIMIT = 25
+
+# 모순율 랭킹에 반영할 검증 시간 범위(시간). 누적 집계를 그대로 쓰면 한 번 1.0을
+# 받은 기사가 영구히 상위를 점유하므로, 최근 검증만 "실시간" 순위로 노출한다.
+# 최다 검증 순위(most_checked)는 누적 기준을 그대로 유지한다.
+RANKING_WINDOW_HOURS = 24
 
 SUPABASE_ENABLED = bool(SUPABASE_URL and SUPABASE_KEY and SUPABASE_URL != "여기에_프로젝트_URL_입력")
 if not SUPABASE_ENABLED:
@@ -441,9 +446,28 @@ async def get_stats(request: Request):
         print(f"[-] 통계 집계 오류: {e}")
         raise HTTPException(status_code=500, detail="통계 데이터를 불러오는 중 오류가 발생했습니다.")
 
+def parse_supabase_timestamp(value):
+    """Supabase의 created_at(ISO 8601)을 tz-aware datetime으로 변환한다.
+
+    파싱 실패 시 None을 돌려주고, 오프셋이 없는 값은 UTC로 간주한다.
+    """
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
 @app.get("/api/stats/rankings")
 async def get_rankings(request: Request):
-    """최다 검증 및 허위 의심 순위 (Rate limit: 분당 60회)"""
+    """최다 검증(누적) 및 모순율 순위(최근 RANKING_WINDOW_HOURS시간) 조회
+
+    Rate limit: 분당 60회
+    """
     check_rate_limit(request, limit=60, window_seconds=60, endpoint_name="rankings")
     if not SUPABASE_ENABLED:
         return {"most_checked": [], "top_fakes": []}
@@ -476,9 +500,26 @@ async def get_rankings(request: Request):
                 "count": count
             })
             
-        fakes = [r for r in rows if r.get('verdict') in ('FAKE', 'SUSPICIOUS')]
-        fakes.sort(key=lambda x: float(x.get('contradiction_score') or 0.0), reverse=True)
-        
+        # 모순율 순위는 최근 RANKING_WINDOW_HOURS 시간 내 검증만 반영한다.
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=RANKING_WINDOW_HOURS)
+        fakes = []
+        for r in rows:
+            if r.get('verdict') not in ('FAKE', 'SUSPICIOUS'):
+                continue
+            created = parse_supabase_timestamp(r.get('created_at'))
+            if created is None or created < cutoff:
+                continue
+            fakes.append(r)
+
+        # 모순율 동점(1.0 다수)이 흔하므로 최신 검증이 위로 오도록 2차 정렬한다.
+        fakes.sort(
+            key=lambda x: (
+                float(x.get('contradiction_score') or 0.0),
+                x.get('created_at') or '',
+            ),
+            reverse=True,
+        )
+
         top_fakes = []
         seen_urls = set()
         for f in fakes:
