@@ -768,9 +768,9 @@ export default function App() {
             </ol>
           )}
 
-          <h3 className={`mt-8 ${kicker} text-neutral-500`}>모순율이 가장 높은 기사</h3>
+          <h3 className={`mt-8 ${kicker} text-neutral-500`}>모순율이 가장 높은 기사 · 최근 24시간</h3>
           {(rankings.top_fakes ?? []).length === 0 ? (
-            <p className="mt-2 text-[11px] text-neutral-400">검출된 거짓 기사가 없습니다.</p>
+            <p className="mt-2 text-[11px] text-neutral-400">최근 24시간 내 검출된 거짓 기사가 없습니다.</p>
           ) : (
             <ol className="mt-2 border-t border-neutral-200 divide-y divide-neutral-200">
               {(rankings.top_fakes ?? []).map((item, idx) => {
